@@ -40,6 +40,11 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
+// --- health check (used by uptime pingers to keep the app awake) ---
+app.get('/health', (req, res) => {
+  res.status(200).json({ ok: true, time: new Date().toISOString() });
+});
+
 // ===== Multer setup for file uploads =====
 const storage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, 'uploads/'),

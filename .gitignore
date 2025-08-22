@@ -1,0 +1,5 @@
+backend/.env
+uploads/
+backend/node_modules/
+support-frontend/node_modules/
+support-frontend/build/

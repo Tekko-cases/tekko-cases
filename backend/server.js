@@ -45,6 +45,14 @@ app.get('/health', (req, res) => {
   res.status(200).json({ ok: true, time: new Date().toISOString() });
 });
 
+// --- map frontend /api/login -> backend /login (put this BEFORE your routes) ---
+app.use((req, res, next) => {
+  if (req.method === 'POST' && req.path === '/api/login') {
+    req.url = '/login';
+  }
+  next();
+});
+
 // ===== Multer setup for file uploads =====
 const storage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, 'uploads/'),

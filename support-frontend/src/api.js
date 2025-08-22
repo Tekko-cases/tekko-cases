@@ -6,6 +6,11 @@ export const api = axios.create({
   baseURL: API_BASE,
 });
 
+api.interceptors.request.use((config) => {
+  if (config.url === '/api/login') config.url = '/login';
+  return config;
+});
+
 // attach token automatically
 api.interceptors.request.use((config) => {
   const t = localStorage.getItem('token');

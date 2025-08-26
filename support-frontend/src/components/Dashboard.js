@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { api, API_BASE } from './api';             // if your file is under src/pages, use ../api instead
+import { api, API_BASE } from './api'; // api.js is in the same folder
 import './Dashboard.css';
 
 const ISSUE_TYPES = ['Product info', 'Plans', 'Rentals', 'Shipping', 'Product support', 'Other'];
@@ -25,8 +25,8 @@ export default function Dashboard({ onLogout, user }) {
 
   // Sorting
   const [sort, setSort] = useState({ key: 'caseNumber', dir: 'desc' });
-  const sortIndicator = (key) => sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
   const toggleSort = (key) => setSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  const sortIndicator = (key) => sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
 
   // New case
   const [newCase, setNewCase] = useState({
@@ -41,19 +41,16 @@ export default function Dashboard({ onLogout, user }) {
   });
   const [caseFiles, setCaseFiles] = useState([]);
 
-  // Autocomplete (Square) – we try /customers/search first, then /api/customers/search as fallback.
+  // Square autocomplete (BACK to the original /api/customers/search)
   const [suggestions, setSuggestions] = useState([]);
   const fetchSuggestions = useCallback(async (query) => {
     const val = String(query || '').trim();
     if (val.length < 2) { setSuggestions([]); return; }
     try {
-      const r = await api.get('/customers/search', { params: { q: val } });
+      const r = await api.get('/api/customers/search', { params: { q: val } });
       setSuggestions(r.data || []);
     } catch {
-      try {
-        const r2 = await api.get('/api/customers/search', { params: { q: val } });
-        setSuggestions(r2.data || []);
-      } catch { setSuggestions([]); }
+      setSuggestions([]);
     }
   }, []);
 
@@ -63,10 +60,10 @@ export default function Dashboard({ onLogout, user }) {
   const [logNote, setLogNote] = useState('');
   const [logFiles, setLogFiles] = useState([]);
 
-  // Loaders
+  // Loaders (BACK to /api/*)
   const loadAgents = useCallback(async () => {
     try {
-      const r = await api.get('/agents');           // no /api
+      const r = await api.get('/api/agents');
       setAgents(r.data || []);
     } catch { setAgents([]); }
   }, []);
@@ -74,7 +71,7 @@ export default function Dashboard({ onLogout, user }) {
   const loadCases = useCallback(async () => {
     const params = { ...filters, status: statusForTab, page, pageSize };
     try {
-      const r = await api.get('/cases', { params }); // no /api
+      const r = await api.get('/api/cases', { params });
       setCases(r.data.items || []);
       setTotal(r.data.total || 0);
     } catch { setCases([]); setTotal(0); }
@@ -99,19 +96,25 @@ export default function Dashboard({ onLogout, user }) {
     return items;
   }, [cases, sort]);
 
-  // Create case (NO /api prefix)
+  // Create case (BACK to /api/cases; Agent = logged-in user)
   const createCase = async () => {
     try {
       if (!newCase.customerName || !newCase.issueType || !newCase.priority) {
         alert('Please fill in Customer, Issue type, and Priority.');
         return;
       }
+      // If it's a brand-new customer (no ID), require a phone number
+      if (!newCase.customerId && !newCase.customerPhone) {
+        alert('Please enter a contact number for new customers.');
+        return;
+      }
+
       const payload = { ...newCase, agent: user?.name || '' };
       const fd = new FormData();
       fd.append('data', JSON.stringify(payload));
       (caseFiles || []).forEach(f => fd.append('files', f));
 
-      await api.post('/cases', fd);                 // no /api
+      await api.post('/api/cases', fd);
 
       setNewCase({
         customerId: '', customerName: '', customerEmail: '', customerPhone: '',
@@ -132,28 +135,28 @@ export default function Dashboard({ onLogout, user }) {
     try {
       const solutionSummary = window.prompt('Add a brief solution summary before closing:');
       if (!solutionSummary) return;
-      await api.put(`/cases/${id}`, { status: 'Closed', solutionSummary }); // no /api
+      await api.put(`/api/cases/${id}`, { status: 'Closed', solutionSummary });
       if (tab === 'active') await loadCases();
     } catch (e) { console.error(e); alert('Failed to close case'); }
   };
   const reopenCase = async (id) => {
     try {
-      await api.put(`/cases/${id}`, { status: 'Open' }); // no /api
+      await api.put(`/api/cases/${id}`, { status: 'Open' });
       setTab('active');
       await loadCases();
     } catch (e) { console.error(e); alert('Failed to reopen case'); }
   };
 
-  // Logs (NO /api prefix)
+  // Add log (BACK to /api/cases/:id/logs; Author = logged-in user)
   const addLog = async () => {
     try {
       if (!selectedCase) return;
       const fd = new FormData();
-      fd.append('agent', user?.name || '');         // logged-in user name
+      fd.append('agent', user?.name || '');
       fd.append('note', logNote);
       (logFiles || []).forEach(f => fd.append('files', f));
 
-      const r = await api.post(`/cases/${selectedCase._id}/logs`, fd); // no /api
+      const r = await api.post(`/api/cases/${selectedCase._id}/logs`, fd);
 
       setSelectedCase(r.data);
       setLogNote('');
@@ -168,7 +171,7 @@ export default function Dashboard({ onLogout, user }) {
 
   // Filters
   function applyFilters(e) { if (e) e.preventDefault(); setFilters(filtersLocal); setPage(1); }
-  function resetFilters()   { const empty = { q: '', issueType: '', agent: '', priority: '' }; setFiltersLocal(empty); setFilters(empty); setPage(1); }
+  function resetFilters() { const empty = { q: '', issueType: '', agent: '', priority: '' }; setFiltersLocal(empty); setFilters(empty); setPage(1); }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -190,7 +193,7 @@ export default function Dashboard({ onLogout, user }) {
           <div className="card">
             <div className="card-title">Create New Case</div>
             <div className="grid2">
-              {/* Customer (autocomplete) */}
+              {/* Customer (Square autocomplete) */}
               <div className="autocomplete">
                 <input
                   placeholder="Customer"
@@ -382,7 +385,6 @@ export default function Dashboard({ onLogout, user }) {
             </div>
 
             <div className="grid2">
-              {/* Author is always the logged-in user; we hide any dropdown */}
               <input type="file" multiple onChange={e => setLogFiles(Array.from(e.target.files || []))} />
               <textarea placeholder="Note…" value={logNote} onChange={e => setLogNote(e.target.value)} />
             </div>

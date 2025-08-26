@@ -39,6 +39,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
+// --- map ALL /api/* -> backend /*  (KEEP this before your other routes) ---
+app.use((req, res, next) => {
+  if (typeof req.url === 'string' && req.url.startsWith('/api/')) {
+    req.url = req.url.replace(/^\/api\//, '/');
+  }
+  next();
+});
 
 // --- health check (used by uptime pingers to keep the app awake) ---
 app.get('/health', (req, res) => {

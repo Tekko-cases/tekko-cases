@@ -1,0 +1,18 @@
+# support-frontend/netlify.toml
+# Netlify will use these settings for your React app
+
+[build]
+  command = "npm run build"
+  publish = "build"            # important: just "build" because this file is inside support-frontend
+
+[build.environment]
+  CI = "false"
+  DISABLE_ESLINT_PLUGIN = "true"
+  NODE_VERSION = "18"
+  REACT_APP_API_BASE = "https://tekko-cases.onrender.com"
+
+# Single Page App routing (so refresh on deep links works)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

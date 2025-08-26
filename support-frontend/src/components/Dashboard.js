@@ -1,17 +1,16 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { api, API_BASE } from '../api';
+import { api, API_BASE } from './api';             // if your file is under src/pages, use ../api instead
 import './Dashboard.css';
 
 const ISSUE_TYPES = ['Product info', 'Plans', 'Rentals', 'Shipping', 'Product support', 'Other'];
-const PRIORITIES = ['Low', 'Medium', 'High'];
+const PRIORITIES  = ['Low', 'Medium', 'High'];
 
 export default function Dashboard({ onLogout, user }) {
-  // ------- Top navigation view -------
-  const [view, setView] = useState('cases'); // 'create' | 'filters' | 'cases'
-  const [tab, setTab] = useState('active');  // active | archived
+  // Tabs
+  const [tab, setTab] = useState('active'); // active | archived
   const statusForTab = tab === 'active' ? 'Open' : 'Closed';
 
-  // Agents (for filter list only)
+  // Agents (for filter only)
   const [agents, setAgents] = useState([]);
 
   // Filters
@@ -26,57 +25,64 @@ export default function Dashboard({ onLogout, user }) {
 
   // Sorting
   const [sort, setSort] = useState({ key: 'caseNumber', dir: 'desc' });
+  const sortIndicator = (key) => sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const toggleSort = (key) => setSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
 
-  // New case (manual customer options)
+  // New case
   const [newCase, setNewCase] = useState({
-    customerId: '', customerName: '', customerEmail: '', customerPhone: '',
-    issueType: '', description: '', priority: '', agent: '', status: 'Open'
+    customerId: '',
+    customerName: '',
+    customerEmail: '',
+    customerPhone: '',
+    issueType: '',
+    description: '',
+    priority: '',
+    status: 'Open',
   });
-  const [extraPhones, setExtraPhones] = useState([]);
   const [caseFiles, setCaseFiles] = useState([]);
 
-  // Customer suggestions (Tekko)
+  // Autocomplete (Square) – we try /customers/search first, then /api/customers/search as fallback.
   const [suggestions, setSuggestions] = useState([]);
   const fetchSuggestions = useCallback(async (query) => {
     const val = String(query || '').trim();
     if (val.length < 2) { setSuggestions([]); return; }
     try {
-      const r = await api.get('/api/customers/search', { params: { q: val } });
+      const r = await api.get('/customers/search', { params: { q: val } });
       setSuggestions(r.data || []);
-    } catch { setSuggestions([]); }
+    } catch {
+      try {
+        const r2 = await api.get('/api/customers/search', { params: { q: val } });
+        setSuggestions(r2.data || []);
+      } catch { setSuggestions([]); }
+    }
   }, []);
 
-  // Inline logs under a case row
+  // Logs drawer
   const [selectedCase, setSelectedCase] = useState(null);
+  const [showLogs, setShowLogs] = useState(false);
   const [logNote, setLogNote] = useState('');
   const [logFiles, setLogFiles] = useState([]);
 
-  // Load
+  // Loaders
   const loadAgents = useCallback(async () => {
-    const r = await api.get('/api/agents');
-    setAgents(r.data);
+    try {
+      const r = await api.get('/agents');           // no /api
+      setAgents(r.data || []);
+    } catch { setAgents([]); }
   }, []);
+
   const loadCases = useCallback(async () => {
     const params = { ...filters, status: statusForTab, page, pageSize };
-    const r = await api.get('/api/cases', { params });
-    setCases(r.data.items);
-    setTotal(r.data.total);
-    // refresh expanded row if open
-    if (selectedCase) {
-      const updated = r.data.items.find(x => x._id === selectedCase._id);
-      if (updated) setSelectedCase(updated);
-    }
-  }, [filters, page, pageSize, statusForTab, selectedCase]);
+    try {
+      const r = await api.get('/cases', { params }); // no /api
+      setCases(r.data.items || []);
+      setTotal(r.data.total || 0);
+    } catch { setCases([]); setTotal(0); }
+  }, [filters, page, pageSize, statusForTab]);
 
   useEffect(() => { loadAgents(); }, [loadAgents]);
   useEffect(() => { loadCases(); }, [loadCases]);
   useEffect(() => { setPage(1); }, [tab]);
-
-  // Sorting
-  function toggleSort(key) {
-    setSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
-  }
-  const sortIndicator = (key) => sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
 
   const sortedCases = useMemo(() => {
     const items = [...cases];
@@ -93,110 +99,130 @@ export default function Dashboard({ onLogout, user }) {
     return items;
   }, [cases, sort]);
 
-  // Create case (with required phone for new customers + extra numbers)
+  // Create case (NO /api prefix)
   const createCase = async () => {
-    if (!newCase.customerName || !newCase.issueType || !newCase.priority) {
-      alert('Please fill in Customer, Issue type, and Priority.');
-      return;
-    }
-    const isNewCustomer = !newCase.customerId && String(newCase.customerName || '').trim().length > 0;
-    if (isNewCustomer && !String(newCase.customerPhone || '').trim()) {
-      alert('Please enter a contact number for a new customer.');
-      return;
-    }
-    const phones = [newCase.customerPhone, ...extraPhones].map(s => String(s || '').trim()).filter(Boolean);
-    const payload = { ...newCase, customerPhone: phones.join(', '), agent: user?.name || '' };
+    try {
+      if (!newCase.customerName || !newCase.issueType || !newCase.priority) {
+        alert('Please fill in Customer, Issue type, and Priority.');
+        return;
+      }
+      const payload = { ...newCase, agent: user?.name || '' };
+      const fd = new FormData();
+      fd.append('data', JSON.stringify(payload));
+      (caseFiles || []).forEach(f => fd.append('files', f));
 
-    const fd = new FormData();
-    fd.append('data', JSON.stringify(payload));
-    (caseFiles || []).forEach(f => fd.append('files', f));
-    await api.post('/api/cases', fd);
+      await api.post('/cases', fd);                 // no /api
 
-    setNewCase({ customerId:'', customerName:'', customerEmail:'', customerPhone:'', issueType:'', description:'', priority:'', status:'Open' });
-    setExtraPhones([]); setCaseFiles([]);
-    setView('cases'); // go to list after creating
-    loadCases();
+      setNewCase({
+        customerId: '', customerName: '', customerEmail: '', customerPhone: '',
+        issueType: '', description: '', priority: '', status: 'Open'
+      });
+      setCaseFiles([]);
+      if (tab === 'active') await loadCases();
+      alert('Case created.');
+    } catch (err) {
+      console.error(err);
+      const msg = err?.response?.data?.error || err?.message || 'Failed to create case';
+      alert('Create case failed: ' + msg);
+    }
   };
 
-  // Close / Reactivate
+  // Close / Reopen
   const closeCase = async (id) => {
-    const solutionSummary = window.prompt('Add a brief solution summary before closing:');
-    if (!solutionSummary) return;
-    await api.put(`/api/cases/${id}`, { status: 'Closed', solutionSummary });
-    loadCases();
+    try {
+      const solutionSummary = window.prompt('Add a brief solution summary before closing:');
+      if (!solutionSummary) return;
+      await api.put(`/cases/${id}`, { status: 'Closed', solutionSummary }); // no /api
+      if (tab === 'active') await loadCases();
+    } catch (e) { console.error(e); alert('Failed to close case'); }
   };
-  const reactivateCase = async (id) => {
-    await api.put(`/api/cases/${id}`, { status: 'Open' });
-    loadCases();
+  const reopenCase = async (id) => {
+    try {
+      await api.put(`/cases/${id}`, { status: 'Open' }); // no /api
+      setTab('active');
+      await loadCases();
+    } catch (e) { console.error(e); alert('Failed to reopen case'); }
   };
 
-  // Logs
+  // Logs (NO /api prefix)
   const addLog = async () => {
-    if (!selectedCase) return;
-    const fd = new FormData();
-    fd.append('note', logNote); // server sets author from JWT user
-    (logFiles || []).forEach(f => fd.append('files', f));
-    const r = await api.post(`/api/cases/${selectedCase._id}/logs`, fd);
-    setSelectedCase(r.data);
-    setLogNote(''); setLogFiles([]);
-    loadCases();
+    try {
+      if (!selectedCase) return;
+      const fd = new FormData();
+      fd.append('agent', user?.name || '');         // logged-in user name
+      fd.append('note', logNote);
+      (logFiles || []).forEach(f => fd.append('files', f));
+
+      const r = await api.post(`/cases/${selectedCase._id}/logs`, fd); // no /api
+
+      setSelectedCase(r.data);
+      setLogNote('');
+      setLogFiles([]);
+      await loadCases();
+    } catch (err) {
+      console.error(err);
+      const msg = err?.response?.data?.error || err?.message || 'Failed to add log';
+      alert('Add log failed: ' + msg);
+    }
   };
 
-  function applyFilters(e){ if(e) e.preventDefault(); setFilters(filtersLocal); setPage(1); setView('cases'); }
-  function resetFilters(){ const empty={q:'', issueType:'', agent:'', priority:''}; setFiltersLocal(empty); setFilters(empty); setPage(1); }
+  // Filters
+  function applyFilters(e) { if (e) e.preventDefault(); setFilters(filtersLocal); setPage(1); }
+  function resetFilters()   { const empty = { q: '', issueType: '', agent: '', priority: '' }; setFiltersLocal(empty); setFilters(empty); setPage(1); }
 
-  const toggleViewRow = (caseObj) => {
-    setSelectedCase(prev => (prev && prev._id === caseObj._id ? null : caseObj));
-    setLogNote(''); setLogFiles([]);
-  };
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  // ---------- UI ----------
   return (
     <div className="page">
-      {/* Top navigation */}
-      <div className="topnav">
-        <div className="brand">Tekko Cases</div>
-        <div className="navlinks">
-          <button className={`navlink ${view==='create'?'active':''}`} onClick={()=>setView('create')}>Create Case</button>
-          <button className={`navlink ${view==='filters'?'active':''}`} onClick={()=>setView('filters')}>Filters</button>
-          <button className={`navlink ${view==='cases'?'active':''}`} onClick={()=>setView('cases')}>Cases</button>
-          {typeof onLogout === 'function' && (
-            <button className="navlink" onClick={onLogout}>Logout</button>
-          )}
+      {/* HEADER with logout */}
+      <header className="appbar">
+        <div className="brand">Tekko cases</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {user && <span className="muted">Signed in as {user.name}</span>}
+          {typeof onLogout === 'function' && <button className="btn" onClick={onLogout}>Log out</button>}
         </div>
-      </div>
+      </header>
 
-      {/* CREATE VIEW */}
-      {view === 'create' && (
+      {/* Create + Filters layout */}
+      <div className="layout">
+        {/* Create case */}
         <section className="col">
           <div className="card">
             <div className="card-title">Create New Case</div>
             <div className="grid2">
-              {/* Customer with suggestions */}
+              {/* Customer (autocomplete) */}
               <div className="autocomplete">
                 <input
                   placeholder="Customer"
                   value={newCase.customerName}
-                  onChange={(e)=>{
-                    const val=e.target.value;
-                    setNewCase({...newCase, customerName:val, customerId:'', customerEmail:'', customerPhone:''});
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewCase({
+                      ...newCase,
+                      customerName: val,
+                      customerId: '', customerEmail: '', customerPhone: '',
+                    });
                     fetchSuggestions(val);
                   }}
-                  onBlur={()=>setTimeout(()=>setSuggestions([]),200)}
+                  onBlur={() => setTimeout(() => setSuggestions([]), 200)}
                 />
-                {suggestions.length>0 && (
+                {suggestions.length > 0 && (
                   <div className="menu">
-                    {suggestions.map(s=>(
-                      <div key={s.id} className="item" onMouseDown={()=>{
-                        setNewCase({
-                          ...newCase,
-                          customerId:s.id,
-                          customerName:s.name||'',
-                          customerEmail:s.email||'',
-                          customerPhone:s.phone||''
-                        });
-                        setSuggestions([]);
-                      }}>
+                    {suggestions.map(s => (
+                      <div
+                        key={s.id}
+                        className="item"
+                        onMouseDown={() => {
+                          setNewCase({
+                            ...newCase,
+                            customerId: s.id,
+                            customerName: s.name || '',
+                            customerEmail: s.email || '',
+                            customerPhone: s.phone || ''
+                          });
+                          setSuggestions([]);
+                        }}
+                      >
                         <div className="title">{s.name}</div>
                         <div className="sub">{s.email || '—'} · {s.phone || '—'}</div>
                       </div>
@@ -205,57 +231,34 @@ export default function Dashboard({ onLogout, user }) {
                 )}
               </div>
 
-              {/* Main phone (required for new customers) */}
               <input
                 placeholder="Contact number (required if new customer)"
                 value={newCase.customerPhone}
-                onChange={e=>setNewCase({...newCase, customerPhone:e.target.value})}
+                onChange={(e) => setNewCase({ ...newCase, customerPhone: e.target.value })}
               />
 
-              {/* Extra numbers (subtle/compact) */}
-              {extraPhones.map((p, idx)=>(
-                <div key={idx} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, opacity:.9 }}>
-                  <input
-                    placeholder={`Additional number ${idx+1}`}
-                    value={p}
-                    onChange={e=>{
-                      const copy=[...extraPhones]; copy[idx]=e.target.value; setExtraPhones(copy);
-                    }}
-                    style={{ flex:1, padding:'4px 6px', fontSize:12 }}
-                  />
-                  <button type="button"
-                          onClick={()=>setExtraPhones(extraPhones.filter((_,i)=>i!==idx))}
-                          style={{ padding:0, border:'none', background:'none', color:'#2563eb', textDecoration:'underline', cursor:'pointer', fontSize:12 }}>
-                    × remove
-                  </button>
-                </div>
-              ))}
-              <button type="button"
-                      onClick={()=>setExtraPhones([...extraPhones,''])}
-                      style={{ padding:0, border:'none', background:'none', color:'#2563eb', textDecoration:'underline', cursor:'pointer', fontSize:12, alignSelf:'start' }}>
-                + Add another number
-              </button>
+              <textarea
+                placeholder="Description"
+                value={newCase.description}
+                onChange={e => setNewCase({ ...newCase, description: e.target.value })}
+              />
 
-              <select value={newCase.issueType} onChange={e=>setNewCase({...newCase, issueType:e.target.value})}>
+              <select value={newCase.issueType} onChange={e => setNewCase({ ...newCase, issueType: e.target.value })}>
                 <option value="">Issue type</option>
                 {ISSUE_TYPES.map(x => <option key={x} value={x}>{x}</option>)}
               </select>
 
-              <textarea placeholder="Description" value={newCase.description}
-                        onChange={e=>setNewCase({...newCase, description:e.target.value})} />
-
-              <select value={newCase.priority} onChange={e=>setNewCase({...newCase, priority:e.target.value})}>
+              <select value={newCase.priority} onChange={e => setNewCase({ ...newCase, priority: e.target.value })}>
                 <option value="">Priority</option>
                 {PRIORITIES.map(x => <option key={x} value={x}>{x}</option>)}
               </select>
 
-              <input type="file" multiple onChange={e=>setCaseFiles(Array.from(e.target.files || []))} />
+              <input type="file" multiple onChange={e => setCaseFiles(Array.from(e.target.files || []))} />
             </div>
 
-            {(newCase.customerEmail || newCase.customerPhone || extraPhones.some(Boolean)) && (
-              <div className="muted" style={{ marginTop:8, fontSize:12 }}>
+            {(newCase.customerEmail || newCase.customerPhone) && (
+              <div className="muted" style={{ marginTop: 8 }}>
                 <b>Customer details:</b> {newCase.customerEmail || '—'} · {newCase.customerPhone || '—'}
-                {extraPhones.filter(Boolean).length>0 && <span> · {extraPhones.filter(Boolean).join(', ')}</span>}
               </div>
             )}
 
@@ -264,153 +267,145 @@ export default function Dashboard({ onLogout, user }) {
             </div>
           </div>
         </section>
-      )}
 
-      {/* FILTERS VIEW */}
-      {view === 'filters' && (
+        {/* Filters & Search */}
         <aside className="col">
           <div className="card">
-            <div className="card-title">Filters</div>
+            <div className="card-title">Filters & Search</div>
             <form onSubmit={applyFilters}>
               <input placeholder="Search (customer, description, logs…)"
                      value={filtersLocal.q}
-                     onChange={e=>setFiltersLocal({...filtersLocal, q:e.target.value})} />
+                     onChange={e => setFiltersLocal({ ...filtersLocal, q: e.target.value })} />
 
-              <div className="grid2">
-                <select value={filtersLocal.issueType} onChange={e=>setFiltersLocal({...filtersLocal, issueType:e.target.value})}>
-                  <option value="">Issue type (all)</option>
-                  {ISSUE_TYPES.map(x => <option key={x} value={x}>{x}</option>)}
-                </select>
+              <select value={filtersLocal.issueType}
+                      onChange={e => setFiltersLocal({ ...filtersLocal, issueType: e.target.value })}>
+                <option value="">Issue type (all)</option>
+                {ISSUE_TYPES.map(x => <option key={x} value={x}>{x}</option>)}
+              </select>
 
-                <select value={filtersLocal.priority} onChange={e=>setFiltersLocal({...filtersLocal, priority:e.target.value})}>
-                  <option value="">Priority (all)</option>
-                  {PRIORITIES.map(x => <option key={x} value={x}>{x}</option>)}
-                </select>
-              </div>
-
-              <select value={filtersLocal.agent} onChange={e=>setFiltersLocal({...filtersLocal, agent:e.target.value})}>
+              <select value={filtersLocal.agent}
+                      onChange={e => setFiltersLocal({ ...filtersLocal, agent: e.target.value })}>
                 <option value="">Agent (all)</option>
-                {agents.map(a => <option key={a._id} value={a.name}>{a.name}</option>)}
+                {agents.map(a => <option key={a._id || a.name} value={a.name}>{a.name}</option>)}
+              </select>
+
+              <select value={filtersLocal.priority}
+                      onChange={e => setFiltersLocal({ ...filtersLocal, priority: e.target.value })}>
+                <option value="">Priority (all)</option>
+                {PRIORITIES.map(x => <option key={x} value={x}>{x}</option>)}
               </select>
 
               <div className="actions-row">
                 <button type="button" className="btn" onClick={resetFilters}>Reset</button>
-                <button className="btn primary" type="submit">Apply & View Cases</button>
+                <button className="btn primary" type="submit">Search</button>
               </div>
             </form>
           </div>
         </aside>
-      )}
+      </div>
 
-      {/* CASES VIEW */}
-      {view === 'cases' && (
-        <div className="card">
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-            <div className="card-title">{tab==='active' ? 'Open Cases' : 'Archived Cases'}</div>
-            <div className="tabs">
-              <button className={`tab ${tab==='active'?'active':''}`} onClick={()=>setTab('active')}>Open</button>
-              <button className={`tab ${tab==='archived'?'active':''}`} onClick={()=>setTab('archived')}>Closed</button>
-            </div>
-          </div>
+      {/* Tabs */}
+      <div className="tabs">
+        <button className={`tab ${tab==='active' ? 'active' : ''}`} onClick={() => setTab('active')}>Active</button>
+        <button className={`tab ${tab==='archived' ? 'active' : ''}`} onClick={() => setTab('archived')}>Archived</button>
+      </div>
 
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th className="th-sort" onClick={()=>toggleSort('caseNumber')}># {sortIndicator('caseNumber')}</th>
-                  <th className="th-sort" onClick={()=>toggleSort('customerName')}>Customer {sortIndicator('customerName')}</th>
-                  <th className="th-sort" onClick={()=>toggleSort('issueType')}>Issue {sortIndicator('issueType')}</th>
-                  <th className="th-sort" onClick={()=>toggleSort('priority')}>Priority {sortIndicator('priority')}</th>
-                  <th className="th-sort" onClick={()=>toggleSort('agent')}>Agent {sortIndicator('agent')}</th>
-                  <th className="th-sort" onClick={()=>toggleSort('status')}>Status {sortIndicator('status')}</th>
-                  <th style={{ width: 260 }}>Actions</th>
+      {/* Cases table */}
+      <div className="card">
+        <div className="card-title">{tab === 'active' ? 'Open Cases' : 'Archived Cases'}</div>
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th className="th-sort" onClick={() => toggleSort('caseNumber')}># {sortIndicator('caseNumber')}</th>
+                <th className="th-sort" onClick={() => toggleSort('customerName')}>Customer {sortIndicator('customerName')}</th>
+                <th className="th-sort" onClick={() => toggleSort('issueType')}>Issue {sortIndicator('issueType')}</th>
+                <th className="th-sort" onClick={() => toggleSort('priority')}>Priority {sortIndicator('priority')}</th>
+                <th className="th-sort" onClick={() => toggleSort('agent')}>Agent {sortIndicator('agent')}</th>
+                <th className="th-sort" onClick={() => toggleSort('status')}>Status {sortIndicator('status')}</th>
+                <th style={{ width: 260 }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedCases.length === 0 && (
+                <tr><td colSpan={7} style={{ padding: 16, color: '#6b7280' }}>No cases.</td></tr>
+              )}
+              {sortedCases.map(c => (
+                <tr key={c._id}>
+                  <td>#{c.caseNumber ?? '—'}</td>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{c.customerName}</div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {(c.customerEmail || '—')} · {(c.customerPhone || '—')}
+                    </div>
+                  </td>
+                  <td>{c.issueType}</td>
+                  <td><span className={`chip ${String(c.priority).toLowerCase()}`}>{c.priority}</span></td>
+                  <td>{c.agent}</td>
+                  <td><span className={`chip ${c.status === 'Open' ? 'open' : 'closed'}`}>{c.status}</span></td>
+                  <td>
+                    <div className="actions-inline">
+                      <button className="btn ghost" onClick={() => { setSelectedCase(c); setShowLogs(true); }}>View</button>
+                      {c.status !== 'Closed' ? (
+                        <button className="btn ghost" onClick={() => closeCase(c._id)}>Close</button>
+                      ) : (
+                        <button className="btn ghost" onClick={() => reopenCase(c._id)}>Reopen</button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {sortedCases.length===0 && (
-                  <tr><td colSpan={7} style={{ padding: 16, color: '#64748b' }}>No cases.</td></tr>
-                )}
-                {sortedCases.map(c=>(
-                  <React.Fragment key={c._id}>
-                    <tr>
-                      <td>#{c.caseNumber ?? '—'}</td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{c.customerName}</div>
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          {(c.customerEmail || '—')} · {(c.customerPhone || '—')}
-                        </div>
-                      </td>
-                      <td>{c.issueType}</td>
-                      <td><span className={`chip ${String(c.priority).toLowerCase()}`}>{c.priority}</span></td>
-                      <td>{c.agent}</td>
-                      <td><span className={`chip ${c.status === 'Open' ? 'open' : 'closed'}`}>{c.status}</span></td>
-                      <td>
-                        <div className="actions-inline">
-                          <button className="btn ghost" onClick={()=>toggleViewRow(c)}>
-                            {selectedCase && selectedCase._id === c._id ? 'Hide' : 'View'}
-                          </button>
-                          {c.status !== 'Closed' && (
-                            <button className="btn ghost" onClick={()=>closeCase(c._id)}>Close</button>
-                          )}
-                          {c.status === 'Closed' && (
-                            <button className="btn ghost" onClick={()=>reactivateCase(c._id)}>Reactivate</button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-                    {selectedCase && selectedCase._id === c._id && (
-                      <tr>
-                        <td colSpan={7}>
-                          <div style={{ padding: 12, background:'#fff' }}>
-                            <div className="muted" style={{ marginBottom: 6 }}>
-                              <b>Customer:</b> {selectedCase.customerName} · {selectedCase.customerEmail || '—'} · {selectedCase.customerPhone || '—'}
-                            </div>
+        {/* Pagination */}
+        <div className="pagination">
+          <button className="btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
+          <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
+          <button className="btn" disabled={page >= Math.max(1, Math.ceil(total / pageSize))}
+                  onClick={() => setPage(p => p + 1)}>Next</button>
+        </div>
+      </div>
 
-                            <div className="muted" style={{ marginBottom: 6 }}>
-                              Author: {user?.name || 'You'}
-                            </div>
+      {/* Logs drawer */}
+      {showLogs && selectedCase && (
+        <div className="drawer">
+          <div className="card">
+            <div className="drawer-header">
+              <div className="card-title">Logs — {selectedCase.customerName}</div>
+              <button className="btn" onClick={() => setShowLogs(false)}>Close</button>
+            </div>
 
-                            <div className="grid2" style={{ alignItems:'start' }}>
-                              <input type="file" multiple onChange={e=>setLogFiles(Array.from(e.target.files || []))} />
-                              <textarea placeholder="Note…" value={logNote} onChange={e=>setLogNote(e.target.value)} />
-                            </div>
-                            <div className="actions-row" style={{ marginTop: 8 }}>
-                              <button className="btn primary" onClick={addLog}>Add log</button>
-                            </div>
+            <div className="muted" style={{ marginBottom: 8 }}>
+              <b>Customer:</b> {selectedCase.customerName} · {selectedCase.customerEmail || '—'} · {selectedCase.customerPhone || '—'}
+            </div>
 
-                            <ul className="loglist" style={{ marginTop: 10 }}>
-                              {selectedCase.logs?.slice().reverse().map((log, i)=>(
-                                <li key={i}>
-                                  <b>{log.author}</b>
-                                  <span className="muted"> — {new Date(log.at).toLocaleString()}</span>
-                                  <div>{log.message}</div>
-                                  {Array.isArray(log.files) && log.files.length>0 && (
-                                    <div className="thumbs">
-                                      {log.files.map((u, j)=>(
-                                        <a key={j} href={`${API_BASE}${u}`} target="_blank" rel="noreferrer">Attachment {j + 1}</a>
-                                      ))}
-                                    </div>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            <div className="grid2">
+              {/* Author is always the logged-in user; we hide any dropdown */}
+              <input type="file" multiple onChange={e => setLogFiles(Array.from(e.target.files || []))} />
+              <textarea placeholder="Note…" value={logNote} onChange={e => setLogNote(e.target.value)} />
+            </div>
+            <div className="actions-row">
+              <button className="btn primary" onClick={addLog}>Add log</button>
+            </div>
 
-          {/* Pagination */}
-          <div className="pagination">
-            <button className="btn" disabled={page<=1} onClick={()=>setPage(p=>p-1)}>Prev</button>
-            <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
-            <button className="btn" disabled={page>=Math.max(1, Math.ceil(total / pageSize))}
-                    onClick={()=>setPage(p=>p+1)}>Next</button>
+            <ul className="loglist">
+              {selectedCase.logs?.slice().reverse().map((log, i) => (
+                <li key={i}>
+                  <b>{log.author}</b>
+                  <span className="muted"> — {new Date(log.at).toLocaleString()}</span>
+                  <div>{log.message}</div>
+                  {Array.isArray(log.files) && log.files.length > 0 && (
+                    <div className="thumbs">
+                      {log.files.map((u, j) => (
+                        <a key={j} href={`${API_BASE}${u}`} target="_blank" rel="noreferrer">Attachment {j + 1}</a>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       )}

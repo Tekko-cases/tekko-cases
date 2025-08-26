@@ -4,6 +4,11 @@ import './index.css';
 import App from './App';
 import './hide-agent';
 import reportWebVitals from './reportWebVitals';
+import { API_BASE } from './api';
+
+// Warm the API once when the site opens
+try { fetch(`${API_BASE}/health`, { cache: 'no-store' }); } catch {}
+
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

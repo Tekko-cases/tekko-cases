@@ -4,6 +4,8 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 require('dotenv').config();
+const bcrypt = require('bcryptjs');
+const User = require('./models/User');
 
 // Bring in our API routes (all endpoints live here)
 const routes = require('./routes');
@@ -31,6 +33,30 @@ app.get('/health', (_req, res) => {
 
 app.get('/healthz', (_req, res) => {
   res.status(200).json({ ok: true, time: new Date().toISOString() });
+});
+
+// emergency admin reset route (safe to run multiple times)
+app.post('/_reset-admin', async (_req, res) => {
+  try {
+    const email = process.env.ADMIN_EMAIL;
+    const password = process.env.ADMIN_PASSWORD;
+    const name = process.env.ADMIN_NAME || 'Admin';
+
+    if (!email || !password) {
+      return res.status(500).json({ ok: false, error: 'ADMIN_EMAIL or ADMIN_PASSWORD missing in env' });
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+    const updated = await User.findOneAndUpdate(
+      { email },
+      { email, name, role: 'admin', password: hash },
+      { upsert: true, new: true }
+    );
+
+    res.json({ ok: true, email: updated.email });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // ----------------------------------------------------------------------------

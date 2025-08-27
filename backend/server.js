@@ -29,6 +29,10 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ ok: true, time: new Date().toISOString() });
 });
 
+app.get('/healthz', (_req, res) => {
+  res.status(200).json({ ok: true, time: new Date().toISOString() });
+});
+
 // ----------------------------------------------------------------------------
 // Start server immediately (so Render marks it healthy) and connect MongoDB
 // in the background. Slow DB? The app still boots and returns a clear log.

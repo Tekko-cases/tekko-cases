@@ -1,13 +1,16 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { api, API_BASE } from './api'; // api.js is in the same folder
+import { api, API_BASE } from './api';
 import './Dashboard.css';
 
 const ISSUE_TYPES = ['Product info', 'Plans', 'Rentals', 'Shipping', 'Product support', 'Other'];
 const PRIORITIES  = ['Low', 'Medium', 'High'];
 
 export default function Dashboard({ onLogout, user }) {
-  // Tabs
-  const [tab, setTab] = useState('active'); // active | archived
+  // Top nav: create | filters | cases
+  const [screen, setScreen] = useState('cases'); // 'create' | 'filters' | 'cases'
+
+  // Tabs inside Cases: active | archived
+  const [tab, setTab] = useState('active');
   const statusForTab = tab === 'active' ? 'Open' : 'Closed';
 
   // Agents (for filter only)
@@ -25,10 +28,10 @@ export default function Dashboard({ onLogout, user }) {
 
   // Sorting
   const [sort, setSort] = useState({ key: 'caseNumber', dir: 'desc' });
-  const toggleSort = (key) => setSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
   const sortIndicator = (key) => sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const toggleSort = (key) => setSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
 
-  // New case
+  // New case (keeps your rules)
   const [newCase, setNewCase] = useState({
     customerId: '',
     customerName: '',
@@ -41,7 +44,7 @@ export default function Dashboard({ onLogout, user }) {
   });
   const [caseFiles, setCaseFiles] = useState([]);
 
-  // Square autocomplete (BACK to the original /api/customers/search)
+  // Square autocomplete — stays on /api/customers/search
   const [suggestions, setSuggestions] = useState([]);
   const fetchSuggestions = useCallback(async (query) => {
     const val = String(query || '').trim();
@@ -60,7 +63,7 @@ export default function Dashboard({ onLogout, user }) {
   const [logNote, setLogNote] = useState('');
   const [logFiles, setLogFiles] = useState([]);
 
-  // Loaders (BACK to /api/*)
+  // Loaders (use /api/*)
   const loadAgents = useCallback(async () => {
     try {
       const r = await api.get('/api/agents');
@@ -96,14 +99,13 @@ export default function Dashboard({ onLogout, user }) {
     return items;
   }, [cases, sort]);
 
-  // Create case (BACK to /api/cases; Agent = logged-in user)
+  // Create case — agent = logged-in user; phone required if new customer
   const createCase = async () => {
     try {
       if (!newCase.customerName || !newCase.issueType || !newCase.priority) {
         alert('Please fill in Customer, Issue type, and Priority.');
         return;
       }
-      // If it's a brand-new customer (no ID), require a phone number
       if (!newCase.customerId && !newCase.customerPhone) {
         alert('Please enter a contact number for new customers.');
         return;
@@ -121,7 +123,8 @@ export default function Dashboard({ onLogout, user }) {
         issueType: '', description: '', priority: '', status: 'Open'
       });
       setCaseFiles([]);
-      if (tab === 'active') await loadCases();
+      setScreen('cases'); // go to list
+      await loadCases();
       alert('Case created.');
     } catch (err) {
       console.error(err);
@@ -130,13 +133,12 @@ export default function Dashboard({ onLogout, user }) {
     }
   };
 
-  // Close / Reopen
   const closeCase = async (id) => {
     try {
       const solutionSummary = window.prompt('Add a brief solution summary before closing:');
       if (!solutionSummary) return;
       await api.put(`/api/cases/${id}`, { status: 'Closed', solutionSummary });
-      if (tab === 'active') await loadCases();
+      await loadCases();
     } catch (e) { console.error(e); alert('Failed to close case'); }
   };
   const reopenCase = async (id) => {
@@ -147,7 +149,6 @@ export default function Dashboard({ onLogout, user }) {
     } catch (e) { console.error(e); alert('Failed to reopen case'); }
   };
 
-  // Add log (BACK to /api/cases/:id/logs; Author = logged-in user)
   const addLog = async () => {
     try {
       if (!selectedCase) return;
@@ -169,27 +170,34 @@ export default function Dashboard({ onLogout, user }) {
     }
   };
 
-  // Filters
-  function applyFilters(e) { if (e) e.preventDefault(); setFilters(filtersLocal); setPage(1); }
-  function resetFilters() { const empty = { q: '', issueType: '', agent: '', priority: '' }; setFiltersLocal(empty); setFilters(empty); setPage(1); }
+  function applyFilters(e) { if (e) e.preventDefault(); setFilters(filtersLocal); setPage(1); alert('Filters applied. Open the Cases tab.'); }
+  function resetFilters()   { const empty = { q: '', issueType: '', agent: '', priority: '' }; setFiltersLocal(empty); setFilters(empty); setPage(1); }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  // --- small top nav ---
+  const Nav = () => (
+    <nav style={{ display:'flex', gap:8, alignItems:'center' }}>
+      <button className={`btn ${screen==='create' ? 'primary' : ''}`} onClick={() => setScreen('create')}>Create case</button>
+      <button className={`btn ${screen==='filters' ? 'primary' : ''}`} onClick={() => setScreen('filters')}>Filters & Search</button>
+      <button className={`btn ${screen==='cases' ? 'primary' : ''}`} onClick={() => setScreen('cases')}>Cases</button>
+      <div style={{ flex:1 }} />
+      {user && <span className="muted">Signed in as {user.name}</span>}
+      {typeof onLogout === 'function' && <button className="btn" onClick={onLogout}>Log out</button>}
+    </nav>
+  );
+
   return (
     <div className="page">
-      {/* HEADER with logout */}
+      {/* HEADER */}
       <header className="appbar">
         <div className="brand">Tekko cases</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {user && <span className="muted">Signed in as {user.name}</span>}
-          {typeof onLogout === 'function' && <button className="btn" onClick={onLogout}>Log out</button>}
-        </div>
+        <Nav />
       </header>
 
-      {/* Create + Filters layout */}
-      <div className="layout">
-        {/* Create case */}
-        <section className="col">
+      {/* CREATE */}
+      {screen === 'create' && (
+        <section className="col" style={{ maxWidth: 900, margin: '12px auto' }}>
           <div className="card">
             <div className="card-title">Create New Case</div>
             <div className="grid2">
@@ -270,9 +278,11 @@ export default function Dashboard({ onLogout, user }) {
             </div>
           </div>
         </section>
+      )}
 
-        {/* Filters & Search */}
-        <aside className="col">
+      {/* FILTERS */}
+      {screen === 'filters' && (
+        <section className="col" style={{ maxWidth: 700, margin: '12px auto' }}>
           <div className="card">
             <div className="card-title">Filters & Search</div>
             <form onSubmit={applyFilters}>
@@ -300,76 +310,81 @@ export default function Dashboard({ onLogout, user }) {
 
               <div className="actions-row">
                 <button type="button" className="btn" onClick={resetFilters}>Reset</button>
-                <button className="btn primary" type="submit">Search</button>
+                <button className="btn primary" type="submit">Apply</button>
               </div>
             </form>
           </div>
-        </aside>
-      </div>
+        </section>
+      )}
 
-      {/* Tabs */}
-      <div className="tabs">
-        <button className={`tab ${tab==='active' ? 'active' : ''}`} onClick={() => setTab('active')}>Active</button>
-        <button className={`tab ${tab==='archived' ? 'active' : ''}`} onClick={() => setTab('archived')}>Archived</button>
-      </div>
+      {/* CASES */}
+      {screen === 'cases' && (
+        <>
+          {/* Tabs (Open/Archived) */}
+          <div className="tabs" style={{ maxWidth: 1100, margin: '8px auto' }}>
+            <button className={`tab ${tab==='active' ? 'active' : ''}`} onClick={() => setTab('active')}>Open</button>
+            <button className={`tab ${tab==='archived' ? 'active' : ''}`} onClick={() => setTab('archived')}>Archived</button>
+          </div>
 
-      {/* Cases table */}
-      <div className="card">
-        <div className="card-title">{tab === 'active' ? 'Open Cases' : 'Archived Cases'}</div>
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th className="th-sort" onClick={() => toggleSort('caseNumber')}># {sortIndicator('caseNumber')}</th>
-                <th className="th-sort" onClick={() => toggleSort('customerName')}>Customer {sortIndicator('customerName')}</th>
-                <th className="th-sort" onClick={() => toggleSort('issueType')}>Issue {sortIndicator('issueType')}</th>
-                <th className="th-sort" onClick={() => toggleSort('priority')}>Priority {sortIndicator('priority')}</th>
-                <th className="th-sort" onClick={() => toggleSort('agent')}>Agent {sortIndicator('agent')}</th>
-                <th className="th-sort" onClick={() => toggleSort('status')}>Status {sortIndicator('status')}</th>
-                <th style={{ width: 260 }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedCases.length === 0 && (
-                <tr><td colSpan={7} style={{ padding: 16, color: '#6b7280' }}>No cases.</td></tr>
-              )}
-              {sortedCases.map(c => (
-                <tr key={c._id}>
-                  <td>#{c.caseNumber ?? '—'}</td>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{c.customerName}</div>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      {(c.customerEmail || '—')} · {(c.customerPhone || '—')}
-                    </div>
-                  </td>
-                  <td>{c.issueType}</td>
-                  <td><span className={`chip ${String(c.priority).toLowerCase()}`}>{c.priority}</span></td>
-                  <td>{c.agent}</td>
-                  <td><span className={`chip ${c.status === 'Open' ? 'open' : 'closed'}`}>{c.status}</span></td>
-                  <td>
-                    <div className="actions-inline">
-                      <button className="btn ghost" onClick={() => { setSelectedCase(c); setShowLogs(true); }}>View</button>
-                      {c.status !== 'Closed' ? (
-                        <button className="btn ghost" onClick={() => closeCase(c._id)}>Close</button>
-                      ) : (
-                        <button className="btn ghost" onClick={() => reopenCase(c._id)}>Reopen</button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+          {/* Cases table */}
+          <section className="col" style={{ maxWidth: 1100, margin: '0 auto' }}>
+            <div className="card">
+              <div className="card-title">{tab === 'active' ? 'Open Cases' : 'Archived Cases'}</div>
+              <div className="table-scroll">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th className="th-sort" onClick={() => toggleSort('caseNumber')}># {sortIndicator('caseNumber')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('customerName')}>Customer {sortIndicator('customerName')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('issueType')}>Issue {sortIndicator('issueType')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('priority')}>Priority {sortIndicator('priority')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('agent')}>Agent {sortIndicator('agent')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('status')}>Status {sortIndicator('status')}</th>
+                      <th style={{ width: 220 }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedCases.length === 0 && (
+                      <tr><td colSpan={7} style={{ padding: 16, color: '#6b7280' }}>No cases.</td></tr>
+                    )}
+                    {sortedCases.map(c => (
+                      <tr key={c._id}>
+                        <td>#{c.caseNumber ?? '—'}</td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{c.customerName}</div>
+                          <div className="muted" style={{ fontSize: 12 }}>
+                            {(c.customerEmail || '—')} · {(c.customerPhone || '—')}
+                          </div>
+                        </td>
+                        <td>{c.issueType}</td>
+                        <td><span className={`chip ${String(c.priority).toLowerCase()}`}>{c.priority}</span></td>
+                        <td>{c.agent}</td>
+                        <td><span className={`chip ${c.status === 'Open' ? 'open' : 'closed'}`}>{c.status}</span></td>
+                        <td>
+                          <div className="actions-inline">
+                            <button className="btn ghost" onClick={() => { setSelectedCase(c); setShowLogs(true); }}>View</button>
+                            {c.status !== 'Closed'
+                              ? <button className="btn ghost" onClick={() => closeCase(c._id)}>Close</button>
+                              : <button className="btn ghost" onClick={() => reopenCase(c._id)}>Reopen</button>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-        {/* Pagination */}
-        <div className="pagination">
-          <button className="btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
-          <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
-          <button className="btn" disabled={page >= Math.max(1, Math.ceil(total / pageSize))}
-                  onClick={() => setPage(p => p + 1)}>Next</button>
-        </div>
-      </div>
+              {/* Pagination */}
+              <div className="pagination">
+                <button className="btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
+                <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
+                <button className="btn" disabled={page >= Math.max(1, Math.ceil(total / pageSize))}
+                        onClick={() => setPage(p => p + 1)}>Next</button>
+              </div>
+            </div>
+          </section>
+        </>
+      )}
 
       {/* Logs drawer */}
       {showLogs && selectedCase && (

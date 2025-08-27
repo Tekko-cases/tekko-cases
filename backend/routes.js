@@ -70,22 +70,41 @@ router.post('/_reset-admin', async (_req, res) => {
 });
 
 // ---------- Auth ----------
-
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body || {};
-    const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    const emailIn = String((req.body || {}).email || '').trim().toLowerCase();
+    const passIn  = String((req.body || {}).password || '');
 
-    const ok = await bcrypt.compare(password, user.password || '');
-    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+    // 1) Try DB user first (normal path)
+    const user = await User.findOne({ email: emailIn });
+    if (user && user.password) {
+      const ok = await bcrypt.compare(passIn, user.password || '');
+      if (ok) {
+        const token = jwt.sign(
+          { id: user._id, email: user.email, name: user.name, role: user.role || 'agent' },
+          JWT_SECRET,
+          { expiresIn: '10d' }
+        );
+        return res.json({ token, user: { name: user.name, email: user.email, role: user.role || 'agent' } });
+      }
+    }
 
-    const token = jwt.sign(
-      { id: user._id, email: user.email, name: user.name, role: user.role || 'agent' },
-      JWT_SECRET,
-      { expiresIn: '10d' }
-    );
-    return res.json({ token, user: { name: user.name, email: user.email, role: user.role || 'agent' } });
+    // 2) Fallback: allow ENV admin login even if DB isn't seeded yet
+    const envEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+    const envPass  = String(process.env.ADMIN_PASSWORD || '');
+    const envName  = process.env.ADMIN_NAME || 'Admin';
+
+    if (emailIn && envEmail && emailIn === envEmail && passIn === envPass) {
+      const token = jwt.sign(
+        { id: 'admin-env', email: envEmail, name: envName, role: 'admin' },
+        JWT_SECRET,
+        { expiresIn: '10d' }
+      );
+      return res.json({ token, user: { name: envName, email: envEmail, role: 'admin' } });
+    }
+
+    // Otherwise, reject
+    return res.status(401).json({ error: 'Invalid credentials' });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: 'login failed' });

@@ -31,7 +31,7 @@ export default function Dashboard({ onLogout, user }) {
   const sortIndicator = (key) => sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
   const toggleSort = (key) => setSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
 
-  // New case (keeps your rules)
+  // New case
   const [newCase, setNewCase] = useState({
     customerId: '',
     customerName: '',
@@ -42,9 +42,10 @@ export default function Dashboard({ onLogout, user }) {
     priority: '',
     status: 'Open',
   });
+  const [extraPhones, setExtraPhones] = useState([]); // subtle extra numbers
   const [caseFiles, setCaseFiles] = useState([]);
 
-  // Square autocomplete — stays on /api/customers/search
+  // Square autocomplete (stays on /api/customers/search)
   const [suggestions, setSuggestions] = useState([]);
   const fetchSuggestions = useCallback(async (query) => {
     const val = String(query || '').trim();
@@ -57,13 +58,11 @@ export default function Dashboard({ onLogout, user }) {
     }
   }, []);
 
-  // Logs drawer
-  const [selectedCase, setSelectedCase] = useState(null);
-  const [showLogs, setShowLogs] = useState(false);
+  // Logs inline under a case row
+  const [expandedCase, setExpandedCase] = useState(null);
   const [logNote, setLogNote] = useState('');
   const [logFiles, setLogFiles] = useState([]);
 
-  // Loaders (use /api/*)
   const loadAgents = useCallback(async () => {
     try {
       const r = await api.get('/api/agents');
@@ -106,12 +105,18 @@ export default function Dashboard({ onLogout, user }) {
         alert('Please fill in Customer, Issue type, and Priority.');
         return;
       }
-      if (!newCase.customerId && !newCase.customerPhone) {
+      const allPhones = [newCase.customerPhone, ...extraPhones].map(s => String(s || '').trim()).filter(Boolean);
+      if (!newCase.customerId && allPhones.length === 0) {
         alert('Please enter a contact number for new customers.');
         return;
       }
 
-      const payload = { ...newCase, agent: user?.name || '' };
+      const payload = {
+        ...newCase,
+        agent: user?.name || '',
+        // store all numbers in one field so backend always persists them
+        customerPhone: allPhones.join(', ')
+      };
       const fd = new FormData();
       fd.append('data', JSON.stringify(payload));
       (caseFiles || []).forEach(f => fd.append('files', f));
@@ -122,8 +127,9 @@ export default function Dashboard({ onLogout, user }) {
         customerId: '', customerName: '', customerEmail: '', customerPhone: '',
         issueType: '', description: '', priority: '', status: 'Open'
       });
+      setExtraPhones([]);
       setCaseFiles([]);
-      setScreen('cases'); // go to list
+      setScreen('cases');
       await loadCases();
       alert('Case created.');
     } catch (err) {
@@ -151,15 +157,13 @@ export default function Dashboard({ onLogout, user }) {
 
   const addLog = async () => {
     try {
-      if (!selectedCase) return;
+      if (!expandedCase) return;
       const fd = new FormData();
       fd.append('agent', user?.name || '');
       fd.append('note', logNote);
       (logFiles || []).forEach(f => fd.append('files', f));
-
-      const r = await api.post(`/api/cases/${selectedCase._id}/logs`, fd);
-
-      setSelectedCase(r.data);
+      const r = await api.post(`/api/cases/${expandedCase._id}/logs`, fd);
+      setExpandedCase(r.data); // refresh inline case
       setLogNote('');
       setLogFiles([]);
       await loadCases();
@@ -170,12 +174,11 @@ export default function Dashboard({ onLogout, user }) {
     }
   };
 
-  function applyFilters(e) { if (e) e.preventDefault(); setFilters(filtersLocal); setPage(1); alert('Filters applied. Open the Cases tab.'); }
+  function applyFilters(e) { if (e) e.preventDefault(); setFilters(filtersLocal); setPage(1); setScreen('cases'); }
   function resetFilters()   { const empty = { q: '', issueType: '', agent: '', priority: '' }; setFiltersLocal(empty); setFilters(empty); setPage(1); }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  // --- small top nav ---
   const Nav = () => (
     <nav style={{ display:'flex', gap:8, alignItems:'center' }}>
       <button className={`btn ${screen==='create' ? 'primary' : ''}`} onClick={() => setScreen('create')}>Create case</button>
@@ -242,11 +245,37 @@ export default function Dashboard({ onLogout, user }) {
                 )}
               </div>
 
+              {/* Primary number (required if new customer) */}
               <input
                 placeholder="Contact number (required if new customer)"
                 value={newCase.customerPhone}
                 onChange={(e) => setNewCase({ ...newCase, customerPhone: e.target.value })}
               />
+
+              {/* Subtle extra numbers */}
+              <div style={{ gridColumn: '1 / -1' }}>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ padding: 0, fontSize: 12, background: 'transparent', textDecoration: 'underline' }}
+                  onClick={() => setExtraPhones(p => [...p, ''])}
+                >
+                  + Add another number
+                </button>
+                {extraPhones.map((ph, i) => (
+                  <input
+                    key={i}
+                    placeholder={`Extra number ${i+1}`}
+                    value={ph}
+                    onChange={e => {
+                      const copy = [...extraPhones];
+                      copy[i] = e.target.value;
+                      setExtraPhones(copy);
+                    }}
+                    style={{ marginTop: 6, fontSize: 12, padding: '6px 8px' }} // less conspicuous
+                  />
+                ))}
+              </div>
 
               <textarea
                 placeholder="Description"
@@ -267,9 +296,9 @@ export default function Dashboard({ onLogout, user }) {
               <input type="file" multiple onChange={e => setCaseFiles(Array.from(e.target.files || []))} />
             </div>
 
-            {(newCase.customerEmail || newCase.customerPhone) && (
+            {(newCase.customerEmail || newCase.customerPhone || extraPhones.length > 0) && (
               <div className="muted" style={{ marginTop: 8 }}>
-                <b>Customer details:</b> {newCase.customerEmail || '—'} · {newCase.customerPhone || '—'}
+                <b>Customer details:</b> {newCase.customerEmail || '—'} · {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '—'}
               </div>
             )}
 
@@ -320,13 +349,11 @@ export default function Dashboard({ onLogout, user }) {
       {/* CASES */}
       {screen === 'cases' && (
         <>
-          {/* Tabs (Open/Archived) */}
           <div className="tabs" style={{ maxWidth: 1100, margin: '8px auto' }}>
             <button className={`tab ${tab==='active' ? 'active' : ''}`} onClick={() => setTab('active')}>Open</button>
             <button className={`tab ${tab==='archived' ? 'active' : ''}`} onClick={() => setTab('archived')}>Archived</button>
           </div>
 
-          {/* Cases table */}
           <section className="col" style={{ maxWidth: 1100, margin: '0 auto' }}>
             <div className="card">
               <div className="card-title">{tab === 'active' ? 'Open Cases' : 'Archived Cases'}</div>
@@ -347,29 +374,79 @@ export default function Dashboard({ onLogout, user }) {
                     {sortedCases.length === 0 && (
                       <tr><td colSpan={7} style={{ padding: 16, color: '#6b7280' }}>No cases.</td></tr>
                     )}
-                    {sortedCases.map(c => (
-                      <tr key={c._id}>
-                        <td>#{c.caseNumber ?? '—'}</td>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{c.customerName}</div>
-                          <div className="muted" style={{ fontSize: 12 }}>
-                            {(c.customerEmail || '—')} · {(c.customerPhone || '—')}
-                          </div>
-                        </td>
-                        <td>{c.issueType}</td>
-                        <td><span className={`chip ${String(c.priority).toLowerCase()}`}>{c.priority}</span></td>
-                        <td>{c.agent}</td>
-                        <td><span className={`chip ${c.status === 'Open' ? 'open' : 'closed'}`}>{c.status}</span></td>
-                        <td>
-                          <div className="actions-inline">
-                            <button className="btn ghost" onClick={() => { setSelectedCase(c); setShowLogs(true); }}>View</button>
-                            {c.status !== 'Closed'
-                              ? <button className="btn ghost" onClick={() => closeCase(c._id)}>Close</button>
-                              : <button className="btn ghost" onClick={() => reopenCase(c._id)}>Reopen</button>}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {sortedCases.map(c => {
+                      const expanded = expandedCase && expandedCase._id === c._id;
+                      return (
+                        <React.Fragment key={c._id}>
+                          <tr>
+                            <td>#{c.caseNumber ?? '—'}</td>
+                            <td>
+                              <div style={{ fontWeight: 600 }}>{c.customerName}</div>
+                              <div className="muted" style={{ fontSize: 12 }}>
+                                {(c.customerEmail || '—')} · {(c.customerPhone || '—')}
+                              </div>
+                            </td>
+                            <td>{c.issueType}</td>
+                            <td><span className={`chip ${String(c.priority).toLowerCase()}`}>{c.priority}</span></td>
+                            <td>{c.agent}</td>
+                            <td><span className={`chip ${c.status === 'Open' ? 'open' : 'closed'}`}>{c.status}</span></td>
+                            <td>
+                              <div className="actions-inline">
+                                <button
+                                  className="btn ghost"
+                                  onClick={() => setExpandedCase(expanded ? null : c)}
+                                >
+                                  {expanded ? 'Hide' : 'View'}
+                                </button>
+                                {c.status !== 'Closed'
+                                  ? <button className="btn ghost" onClick={() => closeCase(c._id)}>Close</button>
+                                  : <button className="btn ghost" onClick={() => reopenCase(c._id)}>Reopen</button>}
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Inline logs row */}
+                          {expanded && (
+                            <tr>
+                              <td colSpan={7} style={{ background: '#fafafa' }}>
+                                <div className="card" style={{ margin: '8px 0' }}>
+                                  <div className="card-title">Logs — {c.customerName}</div>
+
+                                  <div className="muted" style={{ marginBottom: 8 }}>
+                                    <b>Customer:</b> {c.customerName} · {c.customerEmail || '—'} · {c.customerPhone || '—'}
+                                  </div>
+
+                                  <div className="grid2">
+                                    <input type="file" multiple onChange={e => setLogFiles(Array.from(e.target.files || []))} />
+                                    <textarea placeholder="Note…" value={logNote} onChange={e => setLogNote(e.target.value)} />
+                                  </div>
+                                  <div className="actions-row">
+                                    <button className="btn primary" onClick={addLog}>Add log</button>
+                                  </div>
+
+                                  <ul className="loglist">
+                                    {(expandedCase.logs || []).slice().reverse().map((log, i) => (
+                                      <li key={i}>
+                                        <b>{log.author}</b>
+                                        <span className="muted"> — {new Date(log.at).toLocaleString()}</span>
+                                        <div>{log.message}</div>
+                                        {Array.isArray(log.files) && log.files.length > 0 && (
+                                          <div className="thumbs">
+                                            {log.files.map((u, j) => (
+                                              <a key={j} href={`${API_BASE}${u}`} target="_blank" rel="noreferrer">Attachment {j + 1}</a>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -384,47 +461,6 @@ export default function Dashboard({ onLogout, user }) {
             </div>
           </section>
         </>
-      )}
-
-      {/* Logs drawer */}
-      {showLogs && selectedCase && (
-        <div className="drawer">
-          <div className="card">
-            <div className="drawer-header">
-              <div className="card-title">Logs — {selectedCase.customerName}</div>
-              <button className="btn" onClick={() => setShowLogs(false)}>Close</button>
-            </div>
-
-            <div className="muted" style={{ marginBottom: 8 }}>
-              <b>Customer:</b> {selectedCase.customerName} · {selectedCase.customerEmail || '—'} · {selectedCase.customerPhone || '—'}
-            </div>
-
-            <div className="grid2">
-              <input type="file" multiple onChange={e => setLogFiles(Array.from(e.target.files || []))} />
-              <textarea placeholder="Note…" value={logNote} onChange={e => setLogNote(e.target.value)} />
-            </div>
-            <div className="actions-row">
-              <button className="btn primary" onClick={addLog}>Add log</button>
-            </div>
-
-            <ul className="loglist">
-              {selectedCase.logs?.slice().reverse().map((log, i) => (
-                <li key={i}>
-                  <b>{log.author}</b>
-                  <span className="muted"> — {new Date(log.at).toLocaleString()}</span>
-                  <div>{log.message}</div>
-                  {Array.isArray(log.files) && log.files.length > 0 && (
-                    <div className="thumbs">
-                      {log.files.map((u, j) => (
-                        <a key={j} href={`${API_BASE}${u}`} target="_blank" rel="noreferrer">Attachment {j + 1}</a>
-                      ))}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
       )}
     </div>
   );

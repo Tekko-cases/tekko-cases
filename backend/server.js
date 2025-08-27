@@ -9,6 +9,7 @@ dotenv.config();
 
 const Case = require('./models/Case');
 const User = require('./models/User');
+const routes = require('./routes'); 
 
 // ---------- Square client (safe init + optional TLS relax for sandbox/local) ----------
 const { Client, Environment } = require('square');
@@ -39,6 +40,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
+app.use('/', routes);       // mount all routes at root
+app.use('/api', routes);    // and also at /api for the frontend
 // --- map ALL /api/* -> backend /*  (KEEP this before your other routes) ---
 app.use((req, res, next) => {
   if (typeof req.url === 'string' && req.url.startsWith('/api/')) {

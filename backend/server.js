@@ -31,6 +31,30 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ ok: true, time: new Date().toISOString() });
 });
 
+// Always report healthy for Render (support BOTH paths so we never mismatch again)
+app.get(['/healthz', '/health'], (req, res) => {
+  res.status(200).json({ ok: true, time: new Date().toISOString() });
+});
+
+const start = async () => {
+  const PORT = process.env.PORT || 10000;
+
+  try {
+    if (process.env.MONGO_URI) {
+      await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 10000 });
+      console.log('[startup] Mongo connected');
+    } else {
+      console.warn('[startup] MONGO_URI missing — starting without DB');
+    }
+  } catch (err) {
+    console.error('[startup] Mongo connect failed:', err.message);
+  } finally {
+    app.listen(PORT, '0.0.0.0', () => console.log(`[startup] API on ${PORT}`));
+  }
+};
+
+start();
+
 app.get('/healthz', (_req, res) => {
   res.status(200).json({ ok: true, time: new Date().toISOString() });
 });

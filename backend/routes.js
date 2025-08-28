@@ -8,10 +8,15 @@ const path = require('path');
 const fs = require('fs');
 
 const User = require('./models/User');
-const Case = require('./models/Case');          // assumes you already have this
-const Counter = require('./models/Counter');    // assumes you already have this
+const Case = require('./models/Case');
+const Counter = require('./models/Counter');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+
+// small helper to safely use user input inside a regex
+function escapeRegex(s = '') {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 // ---------- Health ----------
 router.get(['/health', '/healthz'], (req, res) => {
@@ -32,7 +37,7 @@ function auth(req, res, next) {
   }
 }
 
-// ---------- Login (current email+password) ----------
+// ---------- Login (email + password; kept as-is) ----------
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
@@ -63,7 +68,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ---------- NEW: Login by agent NAME (or email) ----------
+// ---------- NEW: Login by agent NAME (or email) with partial match ----------
 router.post('/login-name', async (req, res) => {
   try {
     const { email, password, name, username } = req.body || {};
@@ -72,12 +77,22 @@ router.post('/login-name', async (req, res) => {
       return res.status(400).json({ error: 'Name (or email) and password are required' });
     }
 
-    // Find by email if it looks like one; otherwise find by name (case-insensitive)
     let user = null;
     if (ident.includes('@')) {
+      // looks like an email
       user = await User.findOne({ email: ident.toLowerCase(), active: true });
     } else {
-      user = await User.findOne({ name: { $regex: `^${ident}$`, $options: 'i' }, active: true });
+      // try exact name (case-insensitive) first…
+      user =
+        (await User.findOne({
+          active: true,
+          name: { $regex: `^${escapeRegex(ident)}$`, $options: 'i' },
+        })) ||
+        // …then try partial name (contains), e.g. "Toby" => "Toby Brody"
+        (await User.findOne({
+          active: true,
+          name: { $regex: `${escapeRegex(ident)}`, $options: 'i' },
+        }));
     }
 
     if (!user || !user.passwordHash) {
@@ -115,7 +130,7 @@ router.post('/_reset-admin', async (req, res) => {
     const u = await User.findOne({ email: String(email).toLowerCase() });
     if (!u) return res.status(404).json({ error: 'User not found' });
     const raw = String(newPassword);
-    u.passwordHash = await bcrypt.hash(raw, 10); // <-- key change
+    u.passwordHash = await bcrypt.hash(raw, 10);
     await u.save();
     return res.json({ ok: true });
   } catch (err) {
@@ -139,9 +154,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // ---------- Cases ----------
-/**
- * Auto-number helper (if you use sequential case numbers)
- */
+/** Auto-number helper */
 async function nextCaseNumber() {
   const doc = await Counter.findOneAndUpdate(
     { key: 'case' },
@@ -162,10 +175,9 @@ router.get('/cases', auth, async (req, res) => {
   }
 });
 
-// Create case (multipart: files + data). Auto-assign to logged-in agent if none provided.
+// Create case (multipart). Auto-assign to logged-in agent if none provided.
 router.post('/cases', auth, upload.array('files', 12), async (req, res) => {
   try {
-    // `data` may come as JSON in a text field when using multipart
     const data = req.body && req.body.data ? JSON.parse(req.body.data) : req.body || {};
     const attachments = (req.files || []).map((f) => ({
       filename: f.originalname,
@@ -185,10 +197,9 @@ router.post('/cases', auth, upload.array('files', 12), async (req, res) => {
       issueType: data.issueType || 'Other',
       priority: data.priority || 'Normal',
       status: 'Open',
-      // Auto-assign here:
       agent: data.agent || (req.user && req.user.name) || 'Unassigned',
       attachments,
-      logs: [], // start empty
+      logs: [],
     });
 
     res.status(201).json(newCase);

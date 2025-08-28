@@ -1,41 +1,48 @@
 // backend/routes.js
 const express = require('express');
 const router = express.Router();
+
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const path = require('path');
+
+const http = require('http');
+const https = require('https');
+
 const { Client, Environment } = require('square');
 
 const Case = require('./models/Case');
-const User = require('./models/User');
+const User  = require('./models/User');
 
-// ---------- helpers ----------
+/* ============================
+   Helpers / config
+   ============================ */
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
 
-// multer: store uploads in /uploads with original name + timestamp
+// Multer: save uploads under backend/uploads
 const storage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, path.join(process.cwd(), 'backend', 'uploads')),
   filename: (_req, file, cb) => {
     const stamp = Date.now();
-    const safe = file.originalname.replace(/[^\w.\-]+/g, '_');
+    const safe  = file.originalname.replace(/[^\w.\-]+/g, '_');
     cb(null, `${stamp}_${safe}`);
   }
 });
 const upload = multer({ storage });
 
 function toPublicUrls(files) {
-  // server.js serves: app.use('/uploads', express.static('uploads'))
-  // we saved in backend/uploads; static mount points to "uploads" relative to backend/
+  // server serves: app.use('/uploads', express.static('uploads'))
+  // we saved to backend/uploads; static mount points to "uploads"
   return (files || []).map(f => `/uploads/${path.basename(f.path)}`);
 }
 
-// very light auth middleware (reads Authorization: Bearer <token>)
+// Very light auth
 function auth(req, res, next) {
   try {
     const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+    const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) return res.status(401).json({ error: 'No token' });
     req.user = jwt.verify(token, JWT_SECRET);
     next();
@@ -44,22 +51,21 @@ function auth(req, res, next) {
   }
 }
 
-// ---------- Admin: seed/reset (for you only) ----------
-
+/* ============================
+   Admin seed/reset (safe to run)
+   ============================ */
 router.post('/_reset-admin', async (_req, res) => {
   try {
     const name = process.env.ADMIN_NAME || 'Admin';
-    const email = process.env.ADMIN_EMAIL || 'admin@example.com';
-    const raw = process.env.ADMIN_PASSWORD || 'Password1!';
+    const email = (process.env.ADMIN_EMAIL || 'admin@example.com').toLowerCase();
+    const raw   = process.env.ADMIN_PASSWORD || 'Password1!';
 
     let u = await User.findOne({ email });
     if (!u) u = new User({ name, email, role: 'admin' });
 
-    // always ensure the password matches env
-    const hash = await bcrypt.hash(raw, 10);
-    u.password = hash;
-    u.name = name;
-    u.role = 'admin';
+    u.password = await bcrypt.hash(raw, 10);
+    u.name     = name;
+    u.role     = 'admin';
     await u.save();
 
     return res.json({ ok: true, email: u.email });
@@ -69,13 +75,15 @@ router.post('/_reset-admin', async (_req, res) => {
   }
 });
 
-// ---------- Auth ----------
+/* ============================
+   Auth
+   ============================ */
 router.post('/login', async (req, res) => {
   try {
     const emailIn = String((req.body || {}).email || '').trim().toLowerCase();
     const passIn  = String((req.body || {}).password || '');
 
-    // 1) Try DB user first (normal path)
+    // 1) DB user
     const user = await User.findOne({ email: emailIn });
     if (user && user.password) {
       const ok = await bcrypt.compare(passIn, user.password || '');
@@ -89,7 +97,7 @@ router.post('/login', async (req, res) => {
       }
     }
 
-    // 2) Fallback: allow ENV admin login even if DB isn't seeded yet
+    // 2) ENV admin fallback
     const envEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
     const envPass  = String(process.env.ADMIN_PASSWORD || '');
     const envName  = process.env.ADMIN_NAME || 'Admin';
@@ -103,7 +111,6 @@ router.post('/login', async (req, res) => {
       return res.json({ token, user: { name: envName, email: envEmail, role: 'admin' } });
     }
 
-    // Otherwise, reject
     return res.status(401).json({ error: 'Invalid credentials' });
   } catch (e) {
     console.error(e);
@@ -111,11 +118,11 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ---------- Agents (for filter dropdown) ----------
-
+/* ============================
+   Agents (dropdown source)
+   ============================ */
 router.get('/agents', async (_req, res) => {
-  // simplest source: comma-separated list in env
-  const csv = process.env.AGENTS || '';
+  const csv  = process.env.AGENTS || '';
   const list = csv
     .split(',')
     .map(s => s.trim())
@@ -124,52 +131,100 @@ router.get('/agents', async (_req, res) => {
   return res.json(list);
 });
 
-// ---------- Square customers search (best effort) ----------
+/* ============================
+   Square customers (search + list)
+   ============================ */
 
-function makeSquareClient() {
+// Build one client per request (fast with keep-alive); cheap enough.
+function createSquareClient() {
   const token = process.env.SQUARE_ACCESS_TOKEN;
-  if (!token || String(process.env.SQUARE_MOCK).toLowerCase() === 'true') return null;
-  const env = (process.env.SQUARE_ENV || 'production').toLowerCase() === 'sandbox'
-    ? Environment.Sandbox
-    : Environment.Production;
-  return new Client({ accessToken: token, environment: env });
+  if (!token || String(process.env.SQUARE_MOCK || 'false').toLowerCase() === 'true') return null;
+
+  const insecure = String(process.env.SQUARE_TLS_INSECURE || 'false').toLowerCase() === 'true';
+  const envName  = (process.env.SQUARE_ENV || 'production').toLowerCase();
+  const environment = envName === 'sandbox' ? Environment.Sandbox : Environment.Production;
+
+  // keep-alive agents help on Render free instances
+  const keepAlive = { keepAlive: true };
+  const httpAgent  = new http.Agent(keepAlive);
+  const httpsAgent = new https.Agent({ ...keepAlive, rejectUnauthorized: !insecure });
+
+  return new Client({
+    accessToken: token,
+    environment,
+    httpClientOptions: {
+      timeout: 60000,
+      httpAgent,
+      httpsAgent,
+    },
+  });
 }
 
+function mapSquareCustomer(c) {
+  return {
+    id: c.id,
+    name:
+      [c.givenName, c.familyName].filter(Boolean).join(' ') ||
+      c.companyName ||
+      'Customer',
+    email: c.emailAddress || '',
+    phone: (c.phoneNumber || '').replace(/\s+/g, ''),
+  };
+}
+
+/**
+ * GET /customers/search?q=…
+ * - When q is blank, returns first page (visibility check).
+ * - When q is provided, uses textFilter full-text search (name/email/phone/etc).
+ */
 router.get('/customers/search', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  if (q.length < 2) return res.json([]);
-
   try {
-    const client = makeSquareClient();
-    if (!client) return res.json([]); // or return mocked values
+    const q = String(req.query.q || '').trim();
 
-    // Very simple search: filter by given_name / family_name / email / phone
-    const body = {
-      query: {
-        filter: {
-          emailAddress: { fuzzy: { value: q } },
-          phone: { fuzzy: { value: q } },
-          textFilter: q
-        }
-      },
-      limit: 10
+    const client = createSquareClient();
+    if (!client) return res.json([]);
+
+    const { customersApi } = client;
+
+    if (!q) {
+      const list = await customersApi.listCustomers();
+      return res.json((list.result.customers || []).map(mapSquareCustomer));
+    }
+
+    const payload = {
+      query: { textFilter: q },
+      limit: 100,
     };
-
-    const r = await client.customersApi.searchCustomers(body);
-    const items = (r.result?.customers || []).map(c => ({
-      id: c.id,
-      name: [c.givenName, c.familyName].filter(Boolean).join(' ') || (c.companyName || 'Customer'),
-      email: c.emailAddress || '',
-      phone: (c.phoneNumber || '').replace(/\s+/g, '')
-    }));
-    return res.json(items);
+    const resp = await customersApi.searchCustomers(payload);
+    return res.json((resp.result.customers || []).map(mapSquareCustomer));
   } catch (e) {
-    console.error('Square search failed:', e.message);
-    return res.json([]); // don’t fail the UI
+    console.error('Square customers search error:', e?.response?.body || e);
+    return res.json([]); // never break UI
   }
 });
 
-// ---------- Cases ----------
+/**
+ * GET /customers/list?limit=20
+ * Quick connectivity/debug endpoint.
+ */
+router.get('/customers/list', async (req, res) => {
+  try {
+    const client = createSquareClient();
+    if (!client) return res.json([]);
+
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
+    const { customersApi } = client;
+    const resp = await customersApi.listCustomers(undefined, limit);
+    return res.json((resp.result.customers || []).map(mapSquareCustomer));
+  } catch (e) {
+    console.error('Square list customers error:', e?.response?.body || e);
+    return res.json([]);
+  }
+});
+
+/* ============================
+   Cases
+   ============================ */
 
 // List cases with filters & pagination
 router.get('/cases', auth, async (req, res) => {
@@ -185,26 +240,29 @@ router.get('/cases', auth, async (req, res) => {
     } = req.query;
 
     const find = {};
-    if (status) find.status = status;
+    if (status)    find.status    = status;
     if (issueType) find.issueType = issueType;
-    if (agent) find.agent = agent;
-    if (priority) find.priority = priority;
+    if (agent)     find.agent     = agent;
+    if (priority)  find.priority  = priority;
 
     if (q) {
       const rx = new RegExp(String(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       find.$or = [
-        { customerName: rx },
+        { customerName:  rx },
         { customerEmail: rx },
         { customerPhone: rx },
-        { description: rx },
+        { description:   rx },
         { 'logs.message': rx },
       ];
     }
 
-    const skip = (Math.max(1, parseInt(page)) - 1) * Math.max(1, parseInt(pageSize));
+    const pageN   = Math.max(1, parseInt(page));
+    const sizeN   = Math.max(1, parseInt(pageSize));
+    const skip    = (pageN - 1) * sizeN;
+
     const [items, total] = await Promise.all([
-      Case.find(find).sort({ caseNumber: -1 }).skip(skip).limit(parseInt(pageSize)),
-      Case.countDocuments(find)
+      Case.find(find).sort({ caseNumber: -1 }).skip(skip).limit(sizeN),
+      Case.countDocuments(find),
     ]);
 
     return res.json({ items, total });
@@ -217,16 +275,13 @@ router.get('/cases', auth, async (req, res) => {
 // Create a case (files optional) — first log from description
 router.post('/cases', auth, upload.array('files'), async (req, res) => {
   try {
-    // Frontend sends a "data" JSON field with case fields
     const data = JSON.parse(req.body.data || '{}');
 
-    // if your schema auto-increments, fine; otherwise lightweight attempt:
     if (!data.caseNumber) {
       const count = await Case.estimatedDocumentCount();
       data.caseNumber = count + 1;
     }
 
-    // ensure status and agent (agent = logged-in user by design)
     data.status = data.status || 'Open';
     if (!data.agent && req.user?.name) data.agent = req.user.name;
 
@@ -235,25 +290,25 @@ router.post('/cases', auth, upload.array('files'), async (req, res) => {
     const logs = [];
     if (data.description || fileUrls.length) {
       logs.push({
-        author: req.user?.name || data.agent || 'System',
+        author:  req.user?.name || data.agent || 'System',
         message: data.description || '(no message)',
-        files: fileUrls,
-        at: new Date()
+        files:   fileUrls,
+        at:      new Date(),
       });
     }
 
     const doc = new Case({
-      customerId: data.customerId || '',
-      customerName: data.customerName || '',
+      customerId:    data.customerId    || '',
+      customerName:  data.customerName  || '',
       customerEmail: data.customerEmail || '',
       customerPhone: data.customerPhone || '',
-      issueType: data.issueType || '',
-      description: data.description || '',
-      priority: data.priority || 'Low',
-      agent: data.agent || (req.user?.name || ''),
-      status: data.status || 'Open',
-      caseNumber: data.caseNumber,
-      logs
+      issueType:     data.issueType     || '',
+      description:   data.description   || '',
+      priority:      data.priority      || 'Low',
+      agent:         data.agent         || (req.user?.name || ''),
+      status:        data.status        || 'Open',
+      caseNumber:    data.caseNumber,
+      logs,
     });
 
     await doc.save();
@@ -267,7 +322,7 @@ router.post('/cases', auth, upload.array('files'), async (req, res) => {
 // Update case (e.g., closing with solutionSummary)
 router.put('/cases/:id', auth, async (req, res) => {
   try {
-    const id = req.params.id;
+    const id     = req.params.id;
     const update = req.body || {};
 
     const doc = await Case.findById(id);
@@ -277,10 +332,10 @@ router.put('/cases/:id', auth, async (req, res) => {
     if (update.solutionSummary) {
       doc.logs = doc.logs || [];
       doc.logs.push({
-        author: req.user?.name || 'System',
+        author:  req.user?.name || 'System',
         message: `Closed — ${update.solutionSummary}`,
-        files: [],
-        at: new Date()
+        files:   [],
+        at:      new Date(),
       });
     }
 
@@ -295,20 +350,20 @@ router.put('/cases/:id', auth, async (req, res) => {
 // Add log to case (with optional files)
 router.post('/cases/:id/logs', auth, upload.array('files'), async (req, res) => {
   try {
-    const id = req.params.id;
+    const id  = req.params.id;
     const doc = await Case.findById(id);
     if (!doc) return res.status(404).json({ error: 'not found' });
 
-    const note = req.body.note || '';
+    const note   = req.body.note || '';
     const author = (req.body.agent || req.user?.name || 'Agent');
-    const fileUrls = toPublicUrls(req.files);
+    const files  = toPublicUrls(req.files);
 
     doc.logs = doc.logs || [];
     doc.logs.push({
       author,
       message: note,
-      files: fileUrls,
-      at: new Date()
+      files,
+      at: new Date(),
     });
 
     await doc.save();

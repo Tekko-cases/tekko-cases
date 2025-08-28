@@ -13,7 +13,6 @@ const Counter = require('./models/Counter');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
-// small helper to safely use user input inside a regex
 function escapeRegex(s = '') {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -37,7 +36,7 @@ function auth(req, res, next) {
   }
 }
 
-// ---------- Login (email + password; kept as-is) ----------
+// ---------- Login (email + password) ----------
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
@@ -45,30 +44,24 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
     const user = await User.findOne({ email: String(email).toLowerCase(), active: true });
-    if (!user || !user.passwordHash) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    if (!user || !user.passwordHash) return res.status(401).json({ error: 'Invalid credentials' });
+
     const ok = await bcrypt.compare(password, user.passwordHash || '');
-    if (!ok) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = jwt.sign(
       { id: user._id, email: user.email, name: user.name, role: user.role || 'agent' },
       JWT_SECRET,
       { expiresIn: '10d' }
     );
-    return res.json({
-      token,
-      user: { name: user.name, email: user.email, role: user.role || 'agent' },
-    });
+    return res.json({ token, user: { name: user.name, email: user.email, role: user.role || 'agent' } });
   } catch (err) {
     console.error('Login error:', err);
     return res.status(500).json({ error: 'Login failed' });
   }
 });
 
-// ---------- NEW: Login by agent NAME (or email) with partial match ----------
+// ---------- NEW: Login by NAME (or email). Safe: append-only ----------
 router.post('/login-name', async (req, res) => {
   try {
     const { email, password, name, username } = req.body || {};
@@ -79,41 +72,23 @@ router.post('/login-name', async (req, res) => {
 
     let user = null;
     if (ident.includes('@')) {
-      // looks like an email
       user = await User.findOne({ email: ident.toLowerCase(), active: true });
     } else {
-      // try exact name (case-insensitive) first…
       user =
-        (await User.findOne({
-          active: true,
-          name: { $regex: `^${escapeRegex(ident)}$`, $options: 'i' },
-        })) ||
-        // …then try partial name (contains), e.g. "Toby" => "Toby Brody"
-        (await User.findOne({
-          active: true,
-          name: { $regex: `${escapeRegex(ident)}`, $options: 'i' },
-        }));
+        (await User.findOne({ active: true, name: { $regex: `^${escapeRegex(ident)}$`, $options: 'i' } })) ||
+        (await User.findOne({ active: true, name: { $regex: escapeRegex(ident), $options: 'i' } }));
     }
 
-    if (!user || !user.passwordHash) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
+    if (!user || !user.passwordHash) return res.status(401).json({ error: 'Invalid credentials' });
     const ok = await bcrypt.compare(password, user.passwordHash || '');
-    if (!ok) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = jwt.sign(
       { id: user._id, email: user.email, name: user.name, role: user.role || 'agent' },
       JWT_SECRET,
       { expiresIn: '10d' }
     );
-
-    return res.json({
-      token,
-      user: { name: user.name, email: user.email, role: user.role || 'agent' },
-    });
+    return res.json({ token, user: { name: user.name, email: user.email, role: user.role || 'agent' } });
   } catch (err) {
     console.error('Login-name error:', err);
     return res.status(500).json({ error: 'Login failed' });
@@ -124,13 +99,12 @@ router.post('/login-name', async (req, res) => {
 router.post('/_reset-admin', async (req, res) => {
   try {
     const { email, newPassword } = req.body || {};
-    if (!email || !newPassword) {
-      return res.status(400).json({ error: 'email and newPassword are required' });
-    }
+    if (!email || !newPassword) return res.status(400).json({ error: 'email and newPassword are required' });
+
     const u = await User.findOne({ email: String(email).toLowerCase() });
     if (!u) return res.status(404).json({ error: 'User not found' });
-    const raw = String(newPassword);
-    u.passwordHash = await bcrypt.hash(raw, 10);
+
+    u.passwordHash = await bcrypt.hash(String(newPassword), 10);
     await u.save();
     return res.json({ ok: true });
   } catch (err) {
@@ -154,7 +128,6 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // ---------- Cases ----------
-/** Auto-number helper */
 async function nextCaseNumber() {
   const doc = await Counter.findOneAndUpdate(
     { key: 'case' },
@@ -221,9 +194,7 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
       mimetype: f.mimetype,
     }));
 
-    const update = {
-      $push: { logs: { at: new Date(), by: (req.user && req.user.name) || 'Agent', note, files } },
-    };
+    const update = { $push: { logs: { at: new Date(), by: (req.user && req.user.name) || 'Agent', note, files } } };
     const doc = await Case.findByIdAndUpdate(id, update, { new: true });
     if (!doc) return res.status(404).json({ error: 'Case not found' });
     res.json(doc);

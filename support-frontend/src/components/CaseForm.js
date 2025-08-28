@@ -1,79 +1,163 @@
+// support-frontend/src/components/CaseForm.js
 import React, { useState } from 'react';
-import { createCase } from './api';
-import { ISSUE_TYPES, PRIORITIES } from './constants';
 
-export default function CaseForm({ onCaseCreated }) {
-  // who is logged in
-  const user = JSON.parse(localStorage.getItem('user') || 'null');
+const API_BASE =
+  (process.env.REACT_APP_API_URL && process.env.REACT_APP_API_URL.replace(/\/+$/, '')) ||
+  'https://tekko-cases.onrender.com';
 
-  const [form, setForm] = useState({
-    customerName: '',
-    issueType: ISSUE_TYPES[0],
-    priority: PRIORITIES[0],
-    description: ''
-  });
-  const [saving, setSaving] = useState(false);
+export default function CaseForm({ onCreated }) {
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const token = localStorage.getItem('token') || '';
 
-  function change(e) {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  }
+  // form state
+  const [title, setTitle] = useState('');
+  const [phone, setPhone] = useState('');
+  const [description, setDescription] = useState('');
+  const [issueType, setIssueType] = useState('Plans');
+  const [priority, setPriority] = useState('Low');
+  const [files, setFiles] = useState([]);
+  const [customerId, setCustomerId] = useState(null);
+  const [customerName, setCustomerName] = useState('');
 
-  async function submit(e) {
+  // NOTE: keep your existing customer search UI — just make sure to call setCustomerId / setCustomerName
+
+  async function handleSubmit(e) {
     e.preventDefault();
-    setSaving(true);
     try {
       const payload = {
-        ...form,
-        agent: user ? user.name : '' // ✅ auto-use logged-in agent name
+        title: title.trim(),
+        description: description.trim(),
+        customerId,
+        customerName,
+        issueType,
+        priority,
+        // agent is auto-assigned on backend (req.user.name), no need to send
       };
 
-      const created = await createCase(payload);
-      onCaseCreated?.(created);
+      const fd = new FormData();
+      fd.append('data', JSON.stringify(payload));
+      for (const f of files) fd.append('files', f);
 
-      setForm({
-        customerName: '',
-        issueType: ISSUE_TYPES[0],
-        priority: PRIORITIES[0],
-        description: ''
+      const res = await fetch(`${API_BASE}/cases`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }, // important
+        body: fd,
       });
 
-      alert('Case created!');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Create case failed');
+
+      // reset form
+      setTitle('');
+      setPhone('');
+      setDescription('');
+      setIssueType('Plans');
+      setPriority('Low');
+      setFiles([]);
+      if (typeof onCreated === 'function') onCreated(data);
+      alert('Case created');
     } catch (err) {
-      alert(err.message || 'Failed to create case');
-    } finally {
-      setSaving(false);
+      alert(`Create case failed: ${err.message || err}`);
     }
   }
 
   return (
-    <form onSubmit={submit} style={{ display: 'grid', gap: 8 }}>
-      <h2 style={{ marginTop: 0 }}>Create New Case</h2>
+    <form onSubmit={handleSubmit} style={styles.card}>
+      <h3 style={styles.heading}>Create New Case</h3>
 
-      <label>Customer</label>
-      <input name="customerName" value={form.customerName} onChange={change} required />
+      <div style={styles.row}>
+        <div style={styles.col}>
+          <label style={styles.label}>Title</label>
+          <input style={styles.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Short title" />
+        </div>
+        <div style={styles.col}>
+          <label style={styles.label}>Phone</label>
+          <input style={styles.input} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" />
+        </div>
+      </div>
 
-      <label>Issue type</label>
-      <select name="issueType" value={form.issueType} onChange={change}>
-        {ISSUE_TYPES.map(x => <option key={x}>{x}</option>)}
-      </select>
+      {/* Description left + narrow right column with Issue type (top) and Priority (below) */}
+      <div style={styles.grid2}>
+        <div>
+          <label style={styles.label}>Description</label>
+          <textarea
+            style={styles.textarea}
+            rows={6}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe the issue"
+          />
+        </div>
 
-      <label>Description</label>
-      <textarea name="description" value={form.description} onChange={change} rows={3} />
+        <div style={styles.sidebar}>
+          <div>
+            <label style={styles.label}>Issue type</label>
+            <select style={styles.select} value={issueType} onChange={(e) => setIssueType(e.target.value)}>
+              <option>Plans</option>
+              <option>Billing</option>
+              <option>Technical</option>
+              <option>Activation</option>
+              <option>Other</option>
+            </select>
+          </div>
 
-      <label>Priority</label>
-      <select name="priority" value={form.priority} onChange={change}>
-        {PRIORITIES.map(x => <option key={x}>{x}</option>)}
-      </select>
+          <div>
+            <label style={styles.label}>Priority</label>
+            <select style={styles.select} value={priority} onChange={(e) => setPriority(e.target.value)}>
+              <option>Low</option>
+              <option>Normal</option>
+              <option>High</option>
+              <option>Urgent</option>
+            </select>
+          </div>
+        </div>
+      </div>
 
-      {/* Agent dropdown removed */}
+      <div style={styles.row}>
+        <div style={{ ...styles.col, flex: 2 }}>
+          <label style={styles.label}>Attachments</label>
+          <input
+            type="file"
+            multiple
+            onChange={(e) => setFiles(Array.from(e.target.files || []))}
+            style={styles.fileSmall}
+          />
+          {files?.length ? <div style={styles.fileHint}>{files.length} file(s) selected</div> : null}
+        </div>
 
-      <input type="file" style={{ display: 'block', marginTop: 6 }} />
+        <div style={{ ...styles.col, alignSelf: 'end' }}>
+          <button type="submit" style={styles.button}>Create Case</button>
+        </div>
+      </div>
 
-      <div style={{ marginTop: 8 }}>
-        <button className="btn primary" type="submit" disabled={saving}>
-          {saving ? 'Saving…' : 'Create Case'}
-        </button>
+      <div style={styles.subtle}>
+        Signed in as <strong>{user?.name || 'Agent'}</strong>
       </div>
     </form>
   );
 }
+
+const styles = {
+  card: { padding: 20, background: '#fff', borderRadius: 12, boxShadow: '0 6px 20px rgba(0,0,0,0.05)', marginTop: 8 },
+  heading: { margin: 0, marginBottom: 10 },
+  row: { display: 'flex', gap: 12, marginTop: 8 },
+  col: { flex: 1, display: 'grid', gap: 6 },
+  label: { fontSize: 13, color: '#555' },
+  input: { padding: '10px 12px', border: '1px solid #ddd', borderRadius: 10, fontSize: 15, outline: 'none' },
+  textarea: { width: '100%', padding: 12, border: '1px solid #ddd', borderRadius: 10, fontSize: 15, resize: 'vertical' },
+  select: { padding: '10px 12px', border: '1px solid #ddd', borderRadius: 10, fontSize: 15, width: '100%' },
+  grid2: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 220px', // <-- narrow right column
+    gap: 12,
+    alignItems: 'start',
+    marginTop: 8,
+  },
+  sidebar: { display: 'grid', gap: 10 }, // Issue type above Priority
+  button: { padding: '10px 14px', borderRadius: 10, border: 'none', background: '#111827', color: '#fff', fontWeight: 600, cursor: 'pointer' },
+  fileSmall: {
+    padding: 6, border: '1px dashed #d5d5d8', borderRadius: 10, background: '#fafafa', fontSize: 13, width: '100%',
+  },
+  fileHint: { fontSize: 12, color: '#666', marginTop: 6 },
+  subtle: { marginTop: 8, color: '#666', fontSize: 13 },
+};

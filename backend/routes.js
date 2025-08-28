@@ -32,7 +32,7 @@ function auth(req, res, next) {
   }
 }
 
-// ---------- Login (uses passwordHash) ----------
+// ---------- Login (current email+password) ----------
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
@@ -59,6 +59,48 @@ router.post('/login', async (req, res) => {
     });
   } catch (err) {
     console.error('Login error:', err);
+    return res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// ---------- NEW: Login by agent NAME (or email) ----------
+router.post('/login-name', async (req, res) => {
+  try {
+    const { email, password, name, username } = req.body || {};
+    const ident = String(username || name || email || '').trim();
+    if (!ident || !password) {
+      return res.status(400).json({ error: 'Name (or email) and password are required' });
+    }
+
+    // Find by email if it looks like one; otherwise find by name (case-insensitive)
+    let user = null;
+    if (ident.includes('@')) {
+      user = await User.findOne({ email: ident.toLowerCase(), active: true });
+    } else {
+      user = await User.findOne({ name: { $regex: `^${ident}$`, $options: 'i' }, active: true });
+    }
+
+    if (!user || !user.passwordHash) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const ok = await bcrypt.compare(password, user.passwordHash || '');
+    if (!ok) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign(
+      { id: user._id, email: user.email, name: user.name, role: user.role || 'agent' },
+      JWT_SECRET,
+      { expiresIn: '10d' }
+    );
+
+    return res.json({
+      token,
+      user: { name: user.name, email: user.email, role: user.role || 'agent' },
+    });
+  } catch (err) {
+    console.error('Login-name error:', err);
     return res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -152,7 +194,7 @@ router.post('/cases', auth, upload.array('files', 12), async (req, res) => {
     res.status(201).json(newCase);
   } catch (err) {
     console.error('Create case error:', err);
-    res.status(400).json({ error: 'Create case failed', details: String(err && err.message || err) });
+    res.status(400).json({ error: 'Create case failed', details: String((err && err.message) || err) });
   }
 });
 
@@ -176,7 +218,7 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
     res.json(doc);
   } catch (err) {
     console.error('Add log error:', err);
-    res.status(400).json({ error: 'Add log failed', details: String(err && err.message || err) });
+    res.status(400).json({ error: 'Add log failed', details: String((err && err.message) || err) });
   }
 });
 

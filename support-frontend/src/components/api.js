@@ -1,78 +1,119 @@
-// support-frontend/src/components/api.js
+// Unified API helper — paste this file into:
+// 1) support-frontend/src/components/api.js
+// 2) support-frontend/src/api.js
+// (same content in both)
+
+const PICK = (v) => (typeof v === "string" ? v.replace(/\/+$/, "") : v);
+
+// Allow either REACT_APP_API_BASE or REACT_APP_API_URL
 const API_BASE =
-  (process.env.REACT_APP_API_URL && process.env.REACT_APP_API_URL.replace(/\/+$/, '')) ||
-  'https://tekko-cases.onrender.com';
+  PICK(process.env.REACT_APP_API_BASE) ||
+  PICK(process.env.REACT_APP_API_URL) ||
+  "https://tekko-cases.onrender.com";
+
+// Optional timeout support
+const TIMEOUT = Number(process.env.REACT_APP_API_TIMEOUT || 15000);
 
 function authHeaders() {
-  const token = localStorage.getItem('token') || '';
+  const token = localStorage.getItem("token") || "";
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// ---- AUTH ----
+async function fetchJSON(url, options = {}) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), TIMEOUT);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || data?.message || `${res.status}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+/* ===========================
+   AUTH
+=========================== */
+
 export async function loginByName({ username, password }) {
-  const res = await fetch(`${API_BASE}/login-name`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const data = await fetchJSON(`${API_BASE}/login-name`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || 'Login failed');
-  localStorage.setItem('token', data.token || '');
-  localStorage.setItem('user', JSON.stringify(data.user || {}));
+  if (data?.token) localStorage.setItem("token", data.token);
+  if (data?.user) localStorage.setItem("user", JSON.stringify(data.user));
   return data;
 }
 
-// ---- SQUARE ----
+/* ===========================
+   SQUARE
+=========================== */
+
 export async function searchCustomers(q) {
-  const res = await fetch(`${API_BASE}/api/customers/search?q=${encodeURIComponent(q)}`);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || 'Customer search failed');
-  return data; // [{id,name,phone,email}]
+  const url = `${API_BASE}/api/customers/search?q=${encodeURIComponent(q || "")}`;
+  return await fetchJSON(url);
 }
 
-// ---- CASES ----
+/* ===========================
+   CASES
+=========================== */
+
 export async function listCases() {
-  const res = await fetch(`${API_BASE}/cases`, { headers: { ...authHeaders() } });
+  const res = await fetch(`${API_BASE}/cases`, {
+    headers: { ...authHeaders() },
+  });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || 'List cases failed');
+  if (!res.ok) throw new Error(data?.error || "List cases failed");
   return data;
 }
 
-export async function createCase({ title, description, customerId, customerName, issueType, priority }, files = []) {
-  const fd = new FormData();
+export async function createCase(
+  { title, description, customerId, customerName, issueType, priority },
+  files = []
+) {
   const payload = {
-    title: title || '',
-    description: description || '',
-    customerId: customerId || null,
-    customerName: customerName || '',
-    issueType: issueType || 'Other',
-    priority: priority || 'Normal',
-    // agent will be set on the backend from your login token
+    title: title || "",
+    description: description || "",
+    customerId: customerId ?? null,
+    customerName: customerName || "",
+    issueType: issueType || "Other",
+    priority: priority || "Normal",
+    // agent is set on backend from the login token
   };
-  fd.append('data', JSON.stringify(payload));
-  (files || []).forEach((f) => fd.append('files', f));
+
+  const fd = new FormData();
+  fd.append("data", JSON.stringify(payload));
+  (files || []).forEach((f) => f && fd.append("files", f));
 
   const res = await fetch(`${API_BASE}/cases`, {
-    method: 'POST',
-    headers: { ...authHeaders() }, // IMPORTANT: Bearer token only – no Content-Type for FormData
+    method: "POST",
+    headers: { ...authHeaders() }, // do NOT set Content-Type for FormData
     body: fd,
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || 'Create case failed');
+  if (!res.ok) throw new Error(data?.error || "Create case failed");
   return data;
 }
 
 export async function addLog(caseId, note, files = []) {
   const fd = new FormData();
-  fd.append('note', note || '');
-  (files || []).forEach((f) => fd.append('files', f));
+  fd.append("note", note || "");
+  (files || []).forEach((f) => f && fd.append("files", f));
 
   const res = await fetch(`${API_BASE}/cases/${caseId}/logs`, {
-    method: 'POST',
+    method: "POST",
     headers: { ...authHeaders() },
     body: fd,
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || 'Add log failed');
+  if (!res.ok) throw new Error(data?.error || "Add log failed");
   return data;
 }
+
+// Default export for components that import default api
+const api = { loginByName, searchCustomers, listCases, createCase, addLog };
+export default api;

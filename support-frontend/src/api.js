@@ -113,5 +113,5 @@ export async function addLog(caseId, note, files = []) {
 
 // Provide BOTH a default export and a *named* export called `api`
 const api = { loginByName, searchCustomers, listCases, createCase, addLog };
-export { api };
+export { api, API_BASE };   // ← add API_BASE here too
 export default api;

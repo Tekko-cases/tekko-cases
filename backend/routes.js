@@ -13,6 +13,9 @@ const Counter = require('./models/Counter');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
+const ISSUE_TYPES = ['Plans', 'Billing', 'Technical', 'Activation', 'Shipping', 'Other'];
+const PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'];
+
 function escapeRegex(s = '') {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -31,10 +34,15 @@ function auth(req, res, next) {
     const payload = jwt.verify(token, JWT_SECRET);
     req.user = payload; // { id, email, name, role }
     next();
-  } catch (e) {
+  } catch {
     return res.status(401).json({ error: 'Invalid token' });
   }
 }
+
+// ---------- Who am I (debug) ----------
+router.get('/whoami', auth, (req, res) => {
+  res.json({ user: req.user });
+});
 
 // ---------- Login (email + password) ----------
 router.post('/login', async (req, res) => {
@@ -61,7 +69,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ---------- NEW: Login by NAME (or email). Safe: append-only ----------
+// ---------- NEW: Login by NAME (or email) ----------
 router.post('/login-name', async (req, res) => {
   try {
     const { email, password, name, username } = req.body || {};
@@ -80,6 +88,7 @@ router.post('/login-name', async (req, res) => {
     }
 
     if (!user || !user.passwordHash) return res.status(401).json({ error: 'Invalid credentials' });
+
     const ok = await bcrypt.compare(password, user.passwordHash || '');
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
@@ -95,21 +104,50 @@ router.post('/login-name', async (req, res) => {
   }
 });
 
-// ---------- Admin reset password (writes passwordHash) ----------
+// ---------- Admin: reset one user password (email) ----------
 router.post('/_reset-admin', async (req, res) => {
   try {
     const { email, newPassword } = req.body || {};
-    if (!email || !newPassword) return res.status(400).json({ error: 'email and newPassword are required' });
-
+    if (!email || !newPassword) {
+      return res.status(400).json({ error: 'email and newPassword are required' });
+    }
     const u = await User.findOne({ email: String(email).toLowerCase() });
     if (!u) return res.status(404).json({ error: 'User not found' });
-
     u.passwordHash = await bcrypt.hash(String(newPassword), 10);
     await u.save();
     return res.json({ ok: true });
   } catch (err) {
     console.error('Reset admin error:', err);
     return res.status(500).json({ error: 'Reset failed' });
+  }
+});
+
+// ---------- ONE-TIME: seed 7 agent accounts (protected) ----------
+router.get('/admin/seed-agents', async (req, res) => {
+  try {
+    const secret = process.env.SEED_SECRET || 'dev-seed';
+    if ((req.query.secret || '') !== secret) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const pw = String(req.query.pw || 'Assistly1!');
+    const names = ['Sheindy','Chayelle','Yenti','Tzivi','Roisy','Toby','Blimi'];
+
+    const results = [];
+    for (const name of names) {
+      const email = `${name.toLowerCase()}@agents.local`;
+      let u = await User.findOne({ email });
+      if (!u) u = new User({ name, email, role: 'agent', active: true });
+      u.name = name;
+      u.role = 'agent';
+      u.active = true;
+      u.passwordHash = await bcrypt.hash(pw, 10);
+      await u.save();
+      results.push({ name: u.name, email: u.email, role: u.role });
+    }
+    return res.json({ ok: true, seeded: results.length, users: results });
+  } catch (err) {
+    console.error('Seed agents error:', err);
+    return res.status(500).json({ error: 'Seed failed' });
   }
 });
 
@@ -151,7 +189,9 @@ router.get('/cases', auth, async (req, res) => {
 // Create case (multipart). Auto-assign to logged-in agent if none provided.
 router.post('/cases', auth, upload.array('files', 12), async (req, res) => {
   try {
-    const data = req.body && req.body.data ? JSON.parse(req.body.data) : req.body || {};
+    const raw = (req.body && req.body.data) ? req.body.data : JSON.stringify(req.body || {});
+    const data = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
+
     const attachments = (req.files || []).map((f) => ({
       filename: f.originalname,
       path: `/uploads/${path.basename(f.path)}`,
@@ -161,14 +201,18 @@ router.post('/cases', auth, upload.array('files', 12), async (req, res) => {
 
     const caseNumber = await nextCaseNumber();
 
+    // Be forgiving: coerce/sanitize to allowed values
+    const safeIssue = ISSUE_TYPES.includes(data.issueType) ? data.issueType : 'Other';
+    const safePriority = PRIORITIES.includes(data.priority) ? data.priority : 'Normal';
+
     const newCase = await Case.create({
       caseNumber,
       title: data.title || '',
       description: data.description || '',
       customerId: data.customerId || null,
       customerName: data.customerName || '',
-      issueType: data.issueType || 'Other',
-      priority: data.priority || 'Normal',
+      issueType: safeIssue,
+      priority: safePriority,
       status: 'Open',
       agent: data.agent || (req.user && req.user.name) || 'Unassigned',
       attachments,
@@ -194,7 +238,9 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
       mimetype: f.mimetype,
     }));
 
-    const update = { $push: { logs: { at: new Date(), by: (req.user && req.user.name) || 'Agent', note, files } } };
+    const update = {
+      $push: { logs: { at: new Date(), by: (req.user && req.user.name) || 'Agent', note, files } },
+    };
     const doc = await Case.findByIdAndUpdate(id, update, { new: true });
     if (!doc) return res.status(404).json({ error: 'Case not found' });
     res.json(doc);
@@ -204,8 +250,7 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
   }
 });
 
-
-// GET /api/customers/search?q=...
+// ---------- Square customer search (fixed) ----------
 router.get('/api/customers/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
@@ -215,9 +260,7 @@ router.get('/api/customers/search', async (req, res) => {
     if (!token) {
       return res.status(500).json({ error: 'Square not configured (missing SQUARE_ACCESS_TOKEN)' });
     }
-
     const base = process.env.SQUARE_API_BASE || 'https://connect.squareup.com';
-    // Any current Square API date is fine; this just locks the API behavior.
     const squareVersion = process.env.SQUARE_VERSION || '2025-08-20';
 
     const headers = {
@@ -226,7 +269,6 @@ router.get('/api/customers/search', async (req, res) => {
       'Authorization': `Bearer ${token}`,
     };
 
-    // We'll call Square once or twice and merge results.
     const results = new Map();
     async function call(body) {
       const r = await fetch(`${base}/v2/customers/search`, {
@@ -235,44 +277,31 @@ router.get('/api/customers/search', async (req, res) => {
         body: JSON.stringify(body),
       });
       const json = await r.json();
-      if (!r.ok) {
-        // Bubble up Square's error so we can see it during testing
-        throw new Error(JSON.stringify(json));
-      }
+      if (!r.ok) throw new Error(JSON.stringify(json));
       for (const c of (json.customers || [])) results.set(c.id, c);
     }
 
     const looksLikeEmail = q.includes('@');
     const hasDigits = /\d/.test(q);
-
     if (looksLikeEmail) {
-      // Search by email (fuzzy)
       await call({ query: { filter: { email_address: { fuzzy: q } } }, limit: 15 });
     } else if (hasDigits) {
-      // Search by phone (fuzzy)
       await call({ query: { filter: { phone_number: { fuzzy: q } } }, limit: 15 });
-      // Optional: also try email in case digits appear in email local-part
       await call({ query: { filter: { email_address: { fuzzy: q } } }, limit: 15 });
     } else {
-      // Generic text -> try email fuzzy (name search isn’t supported by Square)
       await call({ query: { filter: { email_address: { fuzzy: q } } }, limit: 15 });
     }
 
     const items = Array.from(results.values()).map((c) => ({
       id: c.id,
-      name:
-        [c.given_name, c.family_name].filter(Boolean).join(' ') ||
-        c.company_name ||
-        c.nickname ||
-        'Unnamed',
+      name: [c.given_name, c.family_name].filter(Boolean).join(' ') || c.company_name || c.nickname || 'Unnamed',
       phone: c.phone_number || '',
       email: c.email_address || '',
     }));
-
-    return res.json(items);
+    res.json(items);
   } catch (err) {
     console.error('Square search error:', err);
-    return res.status(500).json({ error: 'Square search error', details: String(err && err.message || err) });
+    res.status(500).json({ error: 'Square search error', details: String((err && err.message) || err) });
   }
 });
 

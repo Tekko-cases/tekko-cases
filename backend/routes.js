@@ -204,4 +204,55 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
   }
 });
 
+// === Added: Square customer search proxy (append-only) ===
+// GET /api/customers/search?q=...
+router.get('/api/customers/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const token = process.env.SQUARE_ACCESS_TOKEN;
+    if (!token) {
+      return res.status(500).json({ error: 'Square not configured (missing SQUARE_ACCESS_TOKEN)' });
+    }
+
+    // Use live Square by default; override with SQUARE_API_BASE if you need sandbox.
+    const base = process.env.SQUARE_API_BASE || 'https://connect.squareup.com';
+    const squareVersion = process.env.SQUARE_VERSION || '2024-06-20';
+
+    // Square "Search Customers" supports a text filter that matches across common fields.
+    const body = { query: { text_filter: q }, limit: 15 };
+
+    const r = await fetch(`${base}/v2/customers/search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Square-Version': squareVersion,
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const json = await r.json();
+    if (!r.ok) {
+      return res.status(502).json({ error: 'Square search failed', details: json });
+    }
+
+    const items = (json.customers || []).map((c) => ({
+      id: c.id,
+      name:
+        [c.given_name, c.family_name].filter(Boolean).join(' ') ||
+        c.company_name ||
+        c.nickname ||
+        'Unnamed',
+      phone: c.phone_number || '',
+      email: c.email_address || '',
+    }));
+
+    return res.json(items);
+  } catch (err) {
+    console.error('Square search error:', err);
+    return res.status(500).json({ error: 'Square search error' });
+  }
+});
+// === End added route ===
+
 module.exports = router;

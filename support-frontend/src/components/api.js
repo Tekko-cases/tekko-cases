@@ -116,4 +116,5 @@ export async function addLog(caseId, note, files = []) {
 
 // Default export for components that import default api
 const api = { loginByName, searchCustomers, listCases, createCase, addLog };
+export { api };         
 export default api;

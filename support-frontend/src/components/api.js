@@ -1,17 +1,14 @@
-// Unified API helper — paste this file into:
-// 1) support-frontend/src/components/api.js
-// 2) support-frontend/src/api.js
-// (same content in both)
+// Axios-like API helper that supports api.get/post/etc AND keeps the named helpers.
+// Safe drop-in that works with existing imports and older call sites.
 
 const PICK = (v) => (typeof v === "string" ? v.replace(/\/+$/, "") : v);
 
 // Allow either REACT_APP_API_BASE or REACT_APP_API_URL
-const API_BASE =
+export const API_BASE =
   PICK(process.env.REACT_APP_API_BASE) ||
   PICK(process.env.REACT_APP_API_URL) ||
   "https://tekko-cases.onrender.com";
 
-// Optional timeout support
 const TIMEOUT = Number(process.env.REACT_APP_API_TIMEOUT || 15000);
 
 function authHeaders() {
@@ -19,56 +16,84 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function fetchJSON(url, options = {}) {
+// Map old paths to new ones (so legacy calls still work)
+function rewritePath(path = "") {
+  // If any code still calls '/customers/search', rewrite to our backend proxy
+  if (path === "/customers/search" || path.startsWith("/customers/search?")) {
+    return path.replace("/customers/search", "/api/customers/search");
+  }
+  return path;
+}
+
+function withParams(url, params) {
+  if (!params || typeof params !== "object") return url;
+  const u = new URL(url, API_BASE);
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") u.searchParams.set(k, v);
+  });
+  return u.pathname.startsWith("http") ? u.toString() : u.href;
+}
+
+async function request(method, path, { params, data, headers } = {}) {
+  const rel = rewritePath(path || "");
+  const url =
+    rel.startsWith("http")
+      ? withParams(rel, params)
+      : withParams(`${API_BASE}${rel.startsWith("/") ? "" : "/"}${rel}`, params);
+
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), TIMEOUT);
+
+  const opts = {
+    method,
+    headers: { ...authHeaders(), ...(headers || {}) },
+    signal: controller.signal,
+  };
+
+  // Body handling
+  if (data instanceof FormData) {
+    opts.body = data; // do NOT set Content-Type
+  } else if (data !== undefined) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(data);
+  }
+
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data?.error || data?.message || `${res.status}`);
-    }
-    return data;
+    const res = await fetch(url, opts);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error || json?.message || `${res.status}`);
+    return json;
   } finally {
     clearTimeout(id);
   }
 }
 
+// Axios-like surface
+const http = {
+  get: (path, config = {}) => request("GET", path, config),
+  delete: (path, config = {}) => request("DELETE", path, config),
+  post: (path, data, config = {}) => request("POST", path, { ...config, data }),
+  put: (path, data, config = {}) => request("PUT", path, { ...config, data }),
+  patch: (path, data, config = {}) => request("PATCH", path, { ...config, data }),
+};
+
 /* ===========================
-   AUTH
+   Named helper functions
 =========================== */
 
 export async function loginByName({ username, password }) {
-  const data = await fetchJSON(`${API_BASE}/login-name`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
+  const data = await http.post("/login-name", { username, password });
   if (data?.token) localStorage.setItem("token", data.token);
   if (data?.user) localStorage.setItem("user", JSON.stringify(data.user));
   return data;
 }
 
-/* ===========================
-   SQUARE
-=========================== */
-
 export async function searchCustomers(q) {
-  const url = `${API_BASE}/api/customers/search?q=${encodeURIComponent(q || "")}`;
-  return await fetchJSON(url);
+  return await http.get("/api/customers/search", { params: { q } });
 }
 
-/* ===========================
-   CASES
-=========================== */
-
 export async function listCases() {
-  const res = await fetch(`${API_BASE}/cases`, {
-    headers: { ...authHeaders() },
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || "List cases failed");
-  return data;
+  return await http.get("/cases");
 }
 
 export async function createCase(
@@ -82,39 +107,32 @@ export async function createCase(
     customerName: customerName || "",
     issueType: issueType || "Other",
     priority: priority || "Normal",
-    // agent is set on backend from the login token
   };
 
   const fd = new FormData();
   fd.append("data", JSON.stringify(payload));
   (files || []).forEach((f) => f && fd.append("files", f));
 
-  const res = await fetch(`${API_BASE}/cases`, {
-    method: "POST",
-    headers: { ...authHeaders() }, // do NOT set Content-Type for FormData
-    body: fd,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || "Create case failed");
-  return data;
+  return await http.post("/cases", fd);
 }
 
 export async function addLog(caseId, note, files = []) {
   const fd = new FormData();
   fd.append("note", note || "");
   (files || []).forEach((f) => f && fd.append("files", f));
-
-  const res = await fetch(`${API_BASE}/cases/${caseId}/logs`, {
-    method: "POST",
-    headers: { ...authHeaders() },
-    body: fd,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || "Add log failed");
-  return data;
+  return await http.post(`/cases/${caseId}/logs`, fd);
 }
 
-// Default export for components that import default api
-const api = { loginByName, searchCustomers, listCases, createCase, addLog };
-export { api, API_BASE };   // ← add API_BASE here
+// Default export is the axios-like object, but also include helpers on it:
+const api = Object.assign({}, http, {
+  API_BASE,
+  loginByName,
+  searchCustomers,
+  listCases,
+  createCase,
+  addLog,
+});
+
+// Provide BOTH a default export and a named `api` so any import style works.
+export { api };
 export default api;

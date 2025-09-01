@@ -281,4 +281,99 @@ router.get('/api/customers/search', async (req, res) => {
   }
 });
 
+// ===== QUICK FIXES (append-only) =======================================
+
+// A. Upsert (create or reset) a single agent by NAME via GET
+//    Example:
+//    /admin/set-agent?secret=YOUR_SECRET&name=Toby&pw=Assistly1!
+router.get('/admin/set-agent', async (req, res) => {
+  try {
+    const secret = process.env.SEED_SECRET || 'dev-seed';
+    if ((req.query.secret || '') !== secret) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const name = String(req.query.name || '').trim();
+    const pw = String(req.query.pw || '').trim();
+    if (!name || !pw) return res.status(400).json({ error: 'name and pw required' });
+
+    const email = `${name.toLowerCase()}@agents.local`;
+
+    // Find by email OR by case-insensitive name
+    const escapeRegex = (s = '') => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let u =
+      (await User.findOne({ email })) ||
+      (await User.findOne({ name: { $regex: `^${escapeRegex(name)}$`, $options: 'i' } }));
+
+    if (!u) u = new User({ name, email, role: 'agent', active: true });
+
+    u.name = name;
+    u.role = 'agent';
+    u.active = true;
+    u.passwordHash = await bcrypt.hash(pw, 10);
+    await u.save();
+
+    return res.json({ ok: true, user: { name: u.name, email: u.email, role: u.role } });
+  } catch (err) {
+    console.error('set-agent error:', err);
+    return res.status(500).json({ error: 'set-agent failed' });
+  }
+});
+
+// B. Square search alias so old frontend calls still work
+//    (If UI calls /customers/search, route it to the same logic as /api/customers/search)
+router.get('/customers/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json([]);
+
+    const token = process.env.SQUARE_ACCESS_TOKEN;
+    if (!token) return res.status(500).json({ error: 'Square not configured (missing SQUARE_ACCESS_TOKEN)' });
+
+    const base = process.env.SQUARE_API_BASE || 'https://connect.squareup.com';
+    const squareVersion = process.env.SQUARE_VERSION || '2025-08-20';
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'Square-Version': squareVersion,
+      Authorization: `Bearer ${token}`,
+    };
+
+    const results = new Map();
+    async function call(body) {
+      const r = await fetch(`${base}/v2/customers/search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(JSON.stringify(json));
+      for (const c of json.customers || []) results.set(c.id, c);
+    }
+
+    const looksLikeEmail = q.includes('@');
+    const hasDigits = /\d/.test(q);
+    if (looksLikeEmail) {
+      await call({ query: { filter: { email_address: { fuzzy: q } } }, limit: 15 });
+    } else if (hasDigits) {
+      await call({ query: { filter: { phone_number: { fuzzy: q } } }, limit: 15 });
+      await call({ query: { filter: { email_address: { fuzzy: q } } }, limit: 15 });
+    } else {
+      await call({ query: { filter: { email_address: { fuzzy: q } } }, limit: 15 });
+    }
+
+    const items = Array.from(results.values()).map((c) => ({
+      id: c.id,
+      name: [c.given_name, c.family_name].filter(Boolean).join(' ') || c.company_name || c.nickname || 'Unnamed',
+      phone: c.phone_number || '',
+      email: c.email_address || '',
+    }));
+    return res.json(items);
+  } catch (err) {
+    console.error('Square alias search error:', err);
+    return res.status(500).json({ error: 'Square search error' });
+  }
+});
+
+// ===== END QUICK FIXES =================================================
+
 module.exports = router;

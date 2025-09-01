@@ -1,7 +1,6 @@
-// Unified API helper — paste this file into:
-// 1) support-frontend/src/components/api.js
-// 2) support-frontend/src/api.js
-// (same content in both)
+// support-frontend/src/api.js
+// Unified API helper used across the app.
+// Exports BOTH a default and a *named* `api` to satisfy any import style.
 
 const PICK = (v) => (typeof v === "string" ? v.replace(/\/+$/, "") : v);
 
@@ -11,7 +10,7 @@ const API_BASE =
   PICK(process.env.REACT_APP_API_URL) ||
   "https://tekko-cases.onrender.com";
 
-// Optional timeout support
+// Optional timeout (ms)
 const TIMEOUT = Number(process.env.REACT_APP_API_TIMEOUT || 15000);
 
 function authHeaders() {
@@ -25,9 +24,7 @@ async function fetchJSON(url, options = {}) {
   try {
     const res = await fetch(url, { ...options, signal: controller.signal });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data?.error || data?.message || `${res.status}`);
-    }
+    if (!res.ok) throw new Error(data?.error || data?.message || `${res.status}`);
     return data;
   } finally {
     clearTimeout(id);
@@ -82,7 +79,7 @@ export async function createCase(
     customerName: customerName || "",
     issueType: issueType || "Other",
     priority: priority || "Normal",
-    // agent is set on backend from the login token
+    // agent is set on the backend from the login token
   };
 
   const fd = new FormData();
@@ -91,7 +88,7 @@ export async function createCase(
 
   const res = await fetch(`${API_BASE}/cases`, {
     method: "POST",
-    headers: { ...authHeaders() }, // do NOT set Content-Type for FormData
+    headers: { ...authHeaders() }, // DO NOT set Content-Type for FormData
     body: fd,
   });
   const data = await res.json();
@@ -114,6 +111,7 @@ export async function addLog(caseId, note, files = []) {
   return data;
 }
 
-// Default export for components that import default api
+// Provide BOTH a default export and a *named* export called `api`
 const api = { loginByName, searchCustomers, listCases, createCase, addLog };
+export { api };
 export default api;

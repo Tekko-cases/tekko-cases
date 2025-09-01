@@ -204,39 +204,61 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
   }
 });
 
-// === Added: Square customer search proxy (append-only) ===
+
 // GET /api/customers/search?q=...
 router.get('/api/customers/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
+    if (!q) return res.json([]);
+
     const token = process.env.SQUARE_ACCESS_TOKEN;
     if (!token) {
       return res.status(500).json({ error: 'Square not configured (missing SQUARE_ACCESS_TOKEN)' });
     }
 
-    // Use live Square by default; override with SQUARE_API_BASE if you need sandbox.
     const base = process.env.SQUARE_API_BASE || 'https://connect.squareup.com';
-    const squareVersion = process.env.SQUARE_VERSION || '2024-06-20';
+    // Any current Square API date is fine; this just locks the API behavior.
+    const squareVersion = process.env.SQUARE_VERSION || '2025-08-20';
 
-    // Square "Search Customers" supports a text filter that matches across common fields.
-    const body = { query: { text_filter: q }, limit: 15 };
+    const headers = {
+      'Content-Type': 'application/json',
+      'Square-Version': squareVersion,
+      'Authorization': `Bearer ${token}`,
+    };
 
-    const r = await fetch(`${base}/v2/customers/search`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Square-Version': squareVersion,
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const json = await r.json();
-    if (!r.ok) {
-      return res.status(502).json({ error: 'Square search failed', details: json });
+    // We'll call Square once or twice and merge results.
+    const results = new Map();
+    async function call(body) {
+      const r = await fetch(`${base}/v2/customers/search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+      const json = await r.json();
+      if (!r.ok) {
+        // Bubble up Square's error so we can see it during testing
+        throw new Error(JSON.stringify(json));
+      }
+      for (const c of (json.customers || [])) results.set(c.id, c);
     }
 
-    const items = (json.customers || []).map((c) => ({
+    const looksLikeEmail = q.includes('@');
+    const hasDigits = /\d/.test(q);
+
+    if (looksLikeEmail) {
+      // Search by email (fuzzy)
+      await call({ query: { filter: { email_address: { fuzzy: q } } }, limit: 15 });
+    } else if (hasDigits) {
+      // Search by phone (fuzzy)
+      await call({ query: { filter: { phone_number: { fuzzy: q } } }, limit: 15 });
+      // Optional: also try email in case digits appear in email local-part
+      await call({ query: { filter: { email_address: { fuzzy: q } } }, limit: 15 });
+    } else {
+      // Generic text -> try email fuzzy (name search isn’t supported by Square)
+      await call({ query: { filter: { email_address: { fuzzy: q } } }, limit: 15 });
+    }
+
+    const items = Array.from(results.values()).map((c) => ({
       id: c.id,
       name:
         [c.given_name, c.family_name].filter(Boolean).join(' ') ||
@@ -250,9 +272,8 @@ router.get('/api/customers/search', async (req, res) => {
     return res.json(items);
   } catch (err) {
     console.error('Square search error:', err);
-    return res.status(500).json({ error: 'Square search error' });
+    return res.status(500).json({ error: 'Square search error', details: String(err && err.message || err) });
   }
 });
-// === End added route ===
 
 module.exports = router;

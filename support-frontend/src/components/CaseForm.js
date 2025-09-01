@@ -1,4 +1,4 @@
-// support-frontend/src/components/CaseForm.js
+// CaseForm.js — FULL REPLACEMENT
 import React, { useState } from 'react';
 
 const API_BASE =
@@ -6,24 +6,27 @@ const API_BASE =
   'https://tekko-cases.onrender.com';
 
 export default function CaseForm({ onCreated }) {
+  // Auth
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const token = localStorage.getItem('token') || '';
 
-  // form state
+  // Form state
   const [title, setTitle] = useState('');
   const [phone, setPhone] = useState('');
   const [description, setDescription] = useState('');
   const [issueType, setIssueType] = useState('Plans');
   const [priority, setPriority] = useState('Low');
   const [files, setFiles] = useState([]);
+
+  // If your customer search sets these, great; otherwise they default empty and backend handles it.
   const [customerId, setCustomerId] = useState(null);
   const [customerName, setCustomerName] = useState('');
 
-  // NOTE: keep your existing customer search UI — just make sure to call setCustomerId / setCustomerName
-
   async function handleSubmit(e) {
     e.preventDefault();
+
     try {
+      // Build payload the backend expects
       const payload = {
         title: title.trim(),
         description: description.trim(),
@@ -31,29 +34,31 @@ export default function CaseForm({ onCreated }) {
         customerName,
         issueType,
         priority,
-        // agent is auto-assigned on backend (req.user.name), no need to send
+        // agent auto-assigns on the backend from the login token
       };
 
+      // Multipart with "data" JSON + "files"
       const fd = new FormData();
       fd.append('data', JSON.stringify(payload));
       for (const f of files) fd.append('files', f);
 
       const res = await fetch(`${API_BASE}/cases`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }, // important
+        headers: { Authorization: `Bearer ${token}` }, // IMPORTANT
         body: fd,
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Create case failed');
 
-      // reset form
+      // Reset
       setTitle('');
       setPhone('');
       setDescription('');
       setIssueType('Plans');
       setPriority('Low');
       setFiles([]);
+
       if (typeof onCreated === 'function') onCreated(data);
       alert('Case created');
     } catch (err) {
@@ -65,18 +70,29 @@ export default function CaseForm({ onCreated }) {
     <form onSubmit={handleSubmit} style={styles.card}>
       <h3 style={styles.heading}>Create New Case</h3>
 
+      {/* Top row: Title + Phone */}
       <div style={styles.row}>
         <div style={styles.col}>
           <label style={styles.label}>Title</label>
-          <input style={styles.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Short title" />
+          <input
+            style={styles.input}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Short title"
+          />
         </div>
         <div style={styles.col}>
           <label style={styles.label}>Phone</label>
-          <input style={styles.input} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" />
+          <input
+            style={styles.input}
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="Optional"
+          />
         </div>
       </div>
 
-      {/* Description left + narrow right column with Issue type (top) and Priority (below) */}
+      {/* Description LEFT + narrow RIGHT column with Issue type (top) + Priority (below) */}
       <div style={styles.grid2}>
         <div>
           <label style={styles.label}>Description</label>
@@ -92,7 +108,11 @@ export default function CaseForm({ onCreated }) {
         <div style={styles.sidebar}>
           <div>
             <label style={styles.label}>Issue type</label>
-            <select style={styles.select} value={issueType} onChange={(e) => setIssueType(e.target.value)}>
+            <select
+              style={styles.select}
+              value={issueType}
+              onChange={(e) => setIssueType(e.target.value)}
+            >
               <option>Plans</option>
               <option>Billing</option>
               <option>Technical</option>
@@ -103,7 +123,11 @@ export default function CaseForm({ onCreated }) {
 
           <div>
             <label style={styles.label}>Priority</label>
-            <select style={styles.select} value={priority} onChange={(e) => setPriority(e.target.value)}>
+            <select
+              style={styles.select}
+              value={priority}
+              onChange={(e) => setPriority(e.target.value)}
+            >
               <option>Low</option>
               <option>Normal</option>
               <option>High</option>
@@ -113,6 +137,7 @@ export default function CaseForm({ onCreated }) {
         </div>
       </div>
 
+      {/* Attachments + Submit */}
       <div style={styles.row}>
         <div style={{ ...styles.col, flex: 2 }}>
           <label style={styles.label}>Attachments</label>
@@ -122,7 +147,9 @@ export default function CaseForm({ onCreated }) {
             onChange={(e) => setFiles(Array.from(e.target.files || []))}
             style={styles.fileSmall}
           />
-          {files?.length ? <div style={styles.fileHint}>{files.length} file(s) selected</div> : null}
+          {files?.length ? (
+            <div style={styles.fileHint}>{files.length} file(s) selected</div>
+          ) : null}
         </div>
 
         <div style={{ ...styles.col, alignSelf: 'end' }}>
@@ -146,18 +173,10 @@ const styles = {
   input: { padding: '10px 12px', border: '1px solid #ddd', borderRadius: 10, fontSize: 15, outline: 'none' },
   textarea: { width: '100%', padding: 12, border: '1px solid #ddd', borderRadius: 10, fontSize: 15, resize: 'vertical' },
   select: { padding: '10px 12px', border: '1px solid #ddd', borderRadius: 10, fontSize: 15, width: '100%' },
-  grid2: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 220px', // <-- narrow right column
-    gap: 12,
-    alignItems: 'start',
-    marginTop: 8,
-  },
+  grid2: { display: 'grid', gridTemplateColumns: '1fr 220px', gap: 12, alignItems: 'start', marginTop: 8 }, // narrow right column
   sidebar: { display: 'grid', gap: 10 }, // Issue type above Priority
   button: { padding: '10px 14px', borderRadius: 10, border: 'none', background: '#111827', color: '#fff', fontWeight: 600, cursor: 'pointer' },
-  fileSmall: {
-    padding: 6, border: '1px dashed #d5d5d8', borderRadius: 10, background: '#fafafa', fontSize: 13, width: '100%',
-  },
+  fileSmall: { padding: 6, border: '1px dashed #d5d5d8', borderRadius: 10, background: '#fafafa', fontSize: 13, width: '100%' },
   fileHint: { fontSize: 12, color: '#666', marginTop: 6 },
   subtle: { marginTop: 8, color: '#666', fontSize: 13 },
 };

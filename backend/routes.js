@@ -228,11 +228,11 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
   }
 });
 
-// ---------- Square customers search (now includes name/company/nickname) ----------
+// ---------- Square customers search (adds name/company via exact/prefix) ----------
 async function squareSearch(req, res) {
   try {
-    const q = String(req.query.q || '').trim();
-    if (!q) return res.json([]);
+    const qOrig = String(req.query.q || '').trim();
+    if (!qOrig) return res.json([]);
 
     const token = process.env.SQUARE_ACCESS_TOKEN;
     if (!token) return res.status(500).json({ error: 'Square not configured (missing SQUARE_ACCESS_TOKEN)' });
@@ -245,6 +245,11 @@ async function squareSearch(req, res) {
       'Square-Version': squareVersion,
       'Authorization': `Bearer ${token}`,
     };
+
+    const q = qOrig;
+    const qLower = qOrig.toLowerCase();
+    const looksLikeEmail = q.includes('@');
+    const hasDigits = /\d/.test(q);
 
     const results = new Map();
     const attempts = [];
@@ -265,26 +270,40 @@ async function squareSearch(req, res) {
       }
     }
 
-    const looksLikeEmail = q.includes('@');
-    const hasDigits = /\d/.test(q);
-
-    // email / phone
+    // Email & phone (keep fuzzy: these already worked for you)
     const snakeEmail = { query: { filter: { email_address: { fuzzy: q } } }, limit: 20 };
     const camelEmail = { query: { filter: { emailAddress: { fuzzy: q } } }, limit: 20 };
     const snakePhone = { query: { filter: { phone_number: { fuzzy: q } } }, limit: 20 };
     const camelPhone = { query: { filter: { phoneNumber: { fuzzy: q } } }, limit: 20 };
 
-    // NAME / COMPANY / NICKNAME (try both shapes)
-    const snakeGiven   = { query: { filter: { given_name:  { fuzzy: q } } }, limit: 20 };
-    const camelGiven   = { query: { filter: { givenName:   { fuzzy: q } } }, limit: 20 };
-    const snakeFamily  = { query: { filter: { family_name: { fuzzy: q } } }, limit: 20 };
-    const camelFamily  = { query: { filter: { familyName:  { fuzzy: q } } }, limit: 20 };
-    const snakeCompany = { query: { filter: { company_name:{ fuzzy: q } } }, limit: 20 };
-    const camelCompany = { query: { filter: { companyName: { fuzzy: q } } }, limit: 20 };
-    const snakeNick    = { query: { filter: { nickname:    { fuzzy: q } } }, limit: 20 };
-    const camelNick    = { query: { filter: { nickname:    { fuzzy: q } } }, limit: 20 }; // nickname is same key
+    // NAME / COMPANY / NICKNAME — use exact & prefix (more compatible than fuzzy)
+    const nameSnake = (field, val, mode) => ({ query: { filter: { [field]: { [mode]: val } } }, limit: 20 });
+    const nameCamel = (field, val, mode) => ({ query: { filter: { [field]: { [mode]: val } } }, limit: 20 });
 
-    // Text filter variants (some Square accounts accept this)
+    const nameBodies = [
+      // given_name
+      ['snake-given-exact',  nameSnake('given_name',  q,      'exact')],
+      ['snake-given-prefix', nameSnake('given_name',  qLower, 'prefix')],
+      ['camel-given-exact',  nameCamel('givenName',   q,      'exact')],
+      ['camel-given-prefix', nameCamel('givenName',   qLower, 'prefix')],
+      // family_name
+      ['snake-family-exact',  nameSnake('family_name', q,      'exact')],
+      ['snake-family-prefix', nameSnake('family_name', qLower, 'prefix')],
+      ['camel-family-exact',  nameCamel('familyName',  q,      'exact')],
+      ['camel-family-prefix', nameCamel('familyName',  qLower, 'prefix')],
+      // company_name
+      ['snake-company-exact',  nameSnake('company_name', q,      'exact')],
+      ['snake-company-prefix', nameSnake('company_name', qLower, 'prefix')],
+      ['camel-company-exact',  nameCamel('companyName',  q,      'exact')],
+      ['camel-company-prefix', nameCamel('companyName',  qLower, 'prefix')],
+      // nickname (same key in both shapes)
+      ['snake-nick-exact',  nameSnake('nickname', q,      'exact')],
+      ['snake-nick-prefix', nameSnake('nickname', qLower, 'prefix')],
+      ['camel-nick-exact',  nameCamel('nickname', q,      'exact')],
+      ['camel-nick-prefix', nameCamel('nickname', qLower, 'prefix')],
+    ];
+
+    // Some accounts support text_filter/textFilter; keep as last resort
     const textSnake = { query: { text_filter: { keywords: [q] } }, limit: 20 };
     const textCamel = { query: { textFilter:  { keywords: [q] } }, limit: 20 };
 
@@ -295,17 +314,11 @@ async function squareSearch(req, res) {
     } else if (hasDigits) {
       queue.push(['snake-phone', snakePhone], ['camel-phone', camelPhone]);
     } else {
-      // pure name/company searches first
-      queue.push(
-        ['snake-given', snakeGiven], ['camel-given', camelGiven],
-        ['snake-family', snakeFamily], ['camel-family', camelFamily],
-        ['snake-company', snakeCompany], ['camel-company', camelCompany],
-        ['snake-nick', snakeNick], ['camel-nick', camelNick]
-      );
-      // then fall back to email and text
+      queue.push(...nameBodies);
+      // also try email in case user typed a name that’s actually part of an email
       queue.push(['snake-email', snakeEmail], ['camel-email', camelEmail]);
     }
-    // always finish with text attempts in case account supports it
+    // finish with text variants
     queue.push(['text-snake', textSnake], ['text-camel', textCamel]);
 
     for (const [label, body] of queue) {

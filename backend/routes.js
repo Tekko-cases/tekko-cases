@@ -228,7 +228,7 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
   }
 });
 
-// ---------- Square customers search (robust, tries multiple payload shapes) ----------
+// ---------- Square customers search (now includes name/company/nickname) ----------
 async function squareSearch(req, res) {
   try {
     const q = String(req.query.q || '').trim();
@@ -246,7 +246,6 @@ async function squareSearch(req, res) {
       'Authorization': `Bearer ${token}`,
     };
 
-    // Helper to POST to Square and merge unique results
     const results = new Map();
     const attempts = [];
     async function tryCall(body, label) {
@@ -261,45 +260,60 @@ async function squareSearch(req, res) {
         for (const c of (json.customers || [])) results.set(c.id, c);
         return true;
       } catch (e) {
-        attempts.push({ label, error: String(e && e.message || e) });
+        attempts.push({ label, error: String((e && e.message) || e) });
         return false;
       }
     }
 
-    // Build candidate payloads and try them in order.
     const looksLikeEmail = q.includes('@');
     const hasDigits = /\d/.test(q);
 
-    // 1) snake_case filters (newer style on some Square versions)
+    // email / phone
     const snakeEmail = { query: { filter: { email_address: { fuzzy: q } } }, limit: 20 };
-    const snakePhone = { query: { filter: { phone_number: { fuzzy: q } } }, limit: 20 };
-
-    // 2) camelCase filters (older SDKs / docs variants)
     const camelEmail = { query: { filter: { emailAddress: { fuzzy: q } } }, limit: 20 };
+    const snakePhone = { query: { filter: { phone_number: { fuzzy: q } } }, limit: 20 };
     const camelPhone = { query: { filter: { phoneNumber: { fuzzy: q } } }, limit: 20 };
 
-    // 3) text filter variants (some regions still accept this)
-    const textSnake = { query: { text_filter: { keywords: [q] } }, limit: 20 };
-    const textCamel = { query: { textFilter: { keywords: [q] } }, limit: 20 };
+    // NAME / COMPANY / NICKNAME (try both shapes)
+    const snakeGiven   = { query: { filter: { given_name:  { fuzzy: q } } }, limit: 20 };
+    const camelGiven   = { query: { filter: { givenName:   { fuzzy: q } } }, limit: 20 };
+    const snakeFamily  = { query: { filter: { family_name: { fuzzy: q } } }, limit: 20 };
+    const camelFamily  = { query: { filter: { familyName:  { fuzzy: q } } }, limit: 20 };
+    const snakeCompany = { query: { filter: { company_name:{ fuzzy: q } } }, limit: 20 };
+    const camelCompany = { query: { filter: { companyName: { fuzzy: q } } }, limit: 20 };
+    const snakeNick    = { query: { filter: { nickname:    { fuzzy: q } } }, limit: 20 };
+    const camelNick    = { query: { filter: { nickname:    { fuzzy: q } } }, limit: 20 }; // nickname is same key
 
-    // Try smartly based on the input
+    // Text filter variants (some Square accounts accept this)
+    const textSnake = { query: { text_filter: { keywords: [q] } }, limit: 20 };
+    const textCamel = { query: { textFilter:  { keywords: [q] } }, limit: 20 };
+
+    // Build attempt queue
     const queue = [];
     if (looksLikeEmail) {
-      queue.push(['snake-email', snakeEmail], ['camel-email', camelEmail], ['text', textSnake], ['text2', textCamel]);
+      queue.push(['snake-email', snakeEmail], ['camel-email', camelEmail]);
     } else if (hasDigits) {
-      queue.push(['snake-phone', snakePhone], ['camel-phone', camelPhone], ['text', textSnake], ['text2', textCamel]);
+      queue.push(['snake-phone', snakePhone], ['camel-phone', camelPhone]);
     } else {
-      queue.push(['snake-email', snakeEmail], ['camel-email', camelEmail], ['text', textSnake], ['text2', textCamel]);
+      // pure name/company searches first
+      queue.push(
+        ['snake-given', snakeGiven], ['camel-given', camelGiven],
+        ['snake-family', snakeFamily], ['camel-family', camelFamily],
+        ['snake-company', snakeCompany], ['camel-company', camelCompany],
+        ['snake-nick', snakeNick], ['camel-nick', camelNick]
+      );
+      // then fall back to email and text
+      queue.push(['snake-email', snakeEmail], ['camel-email', camelEmail]);
     }
+    // always finish with text attempts in case account supports it
+    queue.push(['text-snake', textSnake], ['text-camel', textCamel]);
 
     for (const [label, body] of queue) {
-      // Stop early if we already got some customers
       if (results.size > 0) break;
       await tryCall(body, label);
     }
 
     if (results.size === 0 && attempts.length) {
-      // Return a friendly error with first attempt details so we can see what Square expects on your account
       return res.status(500).json({ error: 'Square search failed', details: attempts[0] });
     }
 

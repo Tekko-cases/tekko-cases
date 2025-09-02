@@ -228,7 +228,7 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
   }
 });
 
-// ---------- Square customers search (adds name/company via exact/prefix) ----------
+// ---------- Square customers search (robust: email/phone via search; names via list+filter) ----------
 async function squareSearch(req, res) {
   try {
     const qOrig = String(req.query.q || '').trim();
@@ -252,82 +252,64 @@ async function squareSearch(req, res) {
     const hasDigits = /\d/.test(q);
 
     const results = new Map();
-    const attempts = [];
-    async function tryCall(body, label) {
-      try {
-        const r = await fetch(`${base}/v2/customers/search`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-        });
+
+    // Helper: POST /v2/customers/search (for email/phone which we know work)
+    async function searchEmailPhone(body) {
+      const r = await fetch(`${base}/v2/customers/search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(JSON.stringify(json));
+      for (const c of (json.customers || [])) results.set(c.id, c);
+    }
+
+    // Helper: GET /v2/customers (paginate a few pages) and filter names locally
+    async function listAndFilterNames(maxPages = Number(process.env.SQUARE_NAME_PAGES || 3)) {
+      let cursor = null;
+      for (let page = 0; page < maxPages; page++) {
+        const url = new URL(`${base}/v2/customers`);
+        url.searchParams.set('limit', '100');
+        if (cursor) url.searchParams.set('cursor', cursor);
+
+        const r = await fetch(url.toString(), { headers });
         const json = await r.json();
         if (!r.ok) throw new Error(JSON.stringify(json));
-        for (const c of (json.customers || [])) results.set(c.id, c);
-        return true;
-      } catch (e) {
-        attempts.push({ label, error: String((e && e.message) || e) });
-        return false;
+
+        for (const c of (json.customers || [])) {
+          const fullName = [c.given_name, c.family_name].filter(Boolean).join(' ').toLowerCase();
+          const company  = (c.company_name || '').toLowerCase();
+          const nick     = (c.nickname || '').toLowerCase();
+
+          if (
+            fullName.includes(qLower) ||
+            company.includes(qLower) ||
+            nick.includes(qLower)
+          ) {
+            results.set(c.id, c);
+          }
+        }
+
+        if (!json.cursor || results.size >= 20) break; // stop early if enough
+        cursor = json.cursor;
       }
     }
 
-    // Email & phone (keep fuzzy: these already worked for you)
-    const snakeEmail = { query: { filter: { email_address: { fuzzy: q } } }, limit: 20 };
-    const camelEmail = { query: { filter: { emailAddress: { fuzzy: q } } }, limit: 20 };
-    const snakePhone = { query: { filter: { phone_number: { fuzzy: q } } }, limit: 20 };
-    const camelPhone = { query: { filter: { phoneNumber: { fuzzy: q } } }, limit: 20 };
-
-    // NAME / COMPANY / NICKNAME — use exact & prefix (more compatible than fuzzy)
-    const nameSnake = (field, val, mode) => ({ query: { filter: { [field]: { [mode]: val } } }, limit: 20 });
-    const nameCamel = (field, val, mode) => ({ query: { filter: { [field]: { [mode]: val } } }, limit: 20 });
-
-    const nameBodies = [
-      // given_name
-      ['snake-given-exact',  nameSnake('given_name',  q,      'exact')],
-      ['snake-given-prefix', nameSnake('given_name',  qLower, 'prefix')],
-      ['camel-given-exact',  nameCamel('givenName',   q,      'exact')],
-      ['camel-given-prefix', nameCamel('givenName',   qLower, 'prefix')],
-      // family_name
-      ['snake-family-exact',  nameSnake('family_name', q,      'exact')],
-      ['snake-family-prefix', nameSnake('family_name', qLower, 'prefix')],
-      ['camel-family-exact',  nameCamel('familyName',  q,      'exact')],
-      ['camel-family-prefix', nameCamel('familyName',  qLower, 'prefix')],
-      // company_name
-      ['snake-company-exact',  nameSnake('company_name', q,      'exact')],
-      ['snake-company-prefix', nameSnake('company_name', qLower, 'prefix')],
-      ['camel-company-exact',  nameCamel('companyName',  q,      'exact')],
-      ['camel-company-prefix', nameCamel('companyName',  qLower, 'prefix')],
-      // nickname (same key in both shapes)
-      ['snake-nick-exact',  nameSnake('nickname', q,      'exact')],
-      ['snake-nick-prefix', nameSnake('nickname', qLower, 'prefix')],
-      ['camel-nick-exact',  nameCamel('nickname', q,      'exact')],
-      ['camel-nick-prefix', nameCamel('nickname', qLower, 'prefix')],
-    ];
-
-    // Some accounts support text_filter/textFilter; keep as last resort
-    const textSnake = { query: { text_filter: { keywords: [q] } }, limit: 20 };
-    const textCamel = { query: { textFilter:  { keywords: [q] } }, limit: 20 };
-
-    // Build attempt queue
-    const queue = [];
-    if (looksLikeEmail) {
-      queue.push(['snake-email', snakeEmail], ['camel-email', camelEmail]);
-    } else if (hasDigits) {
-      queue.push(['snake-phone', snakePhone], ['camel-phone', camelPhone]);
-    } else {
-      queue.push(...nameBodies);
-      // also try email in case user typed a name that’s actually part of an email
-      queue.push(['snake-email', snakeEmail], ['camel-email', camelEmail]);
-    }
-    // finish with text variants
-    queue.push(['text-snake', textSnake], ['text-camel', textCamel]);
-
-    for (const [label, body] of queue) {
-      if (results.size > 0) break;
-      await tryCall(body, label);
-    }
-
-    if (results.size === 0 && attempts.length) {
-      return res.status(500).json({ error: 'Square search failed', details: attempts[0] });
+    // 1) Email / phone with Square's search (these already worked for you)
+    try {
+      if (looksLikeEmail) {
+        await searchEmailPhone({ query: { filter: { email_address: { fuzzy: q } } }, limit: 20 });
+      } else if (hasDigits) {
+        await searchEmailPhone({ query: { filter: { phone_number: { fuzzy: q } } }, limit: 20 });
+      } else {
+        // 2) Name/company/nickname via list+filter (no reliance on unsupported name filters)
+        await listAndFilterNames();
+      }
+    } catch (e) {
+      // If email/phone search fails for some reason, fall back to list+filter as a safety net
+      if (!looksLikeEmail && !hasDigits) throw e;
+      await listAndFilterNames();
     }
 
     const items = Array.from(results.values()).map((c) => ({
@@ -336,6 +318,7 @@ async function squareSearch(req, res) {
       phone: c.phone_number || '',
       email: c.email_address || '',
     }));
+
     return res.json(items);
   } catch (err) {
     console.error('Square search error:', err);

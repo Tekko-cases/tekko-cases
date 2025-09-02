@@ -58,24 +58,52 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Login by NAME (or email)
+// ---------- Login by NAME (or email) — auto-create known agents ----------
 router.post('/login-name', async (req, res) => {
   try {
     const { email, password, name, username } = req.body || {};
-    const ident = String(username || name || email || '').trim();
-    if (!ident || !password) return res.status(400).json({ error: 'Name (or email) and password are required' });
+    const identRaw = String(username || name || email || '').trim();
+    if (!identRaw || !password) {
+      return res.status(400).json({ error: 'Name (or email) and password are required' });
+    }
 
+    const ident = identRaw.trim();
+    const identLower = ident.toLowerCase();
+
+    // Allowed agent names (case-insensitive). You can also set ENV AGENT_NAMES if you prefer.
+    const allowed =
+      (process.env.AGENT_NAMES || 'Sheindy,Chayelle,Yenti,Tzivi,Roisy,Toby,Blimi')
+        .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+    // Find user: by email or by name (case-insensitive)
+    const escapeRegex = (s = '') => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     let user = null;
     if (ident.includes('@')) {
-      user = await User.findOne({ email: ident.toLowerCase(), active: true });
+      user = await User.findOne({ email: identLower, active: true });
     } else {
       user =
         (await User.findOne({ active: true, name: { $regex: `^${escapeRegex(ident)}$`, $options: 'i' } })) ||
         (await User.findOne({ active: true, name: { $regex: escapeRegex(ident), $options: 'i' } }));
     }
-    if (!user || !user.passwordHash) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const ok = await bcrypt.compare(password, user.passwordHash || '');
+    // If not found, but the name is in our allowed list, auto-create the agent
+    if (!user && allowed.includes(identLower) && !ident.includes('@')) {
+      const emailAuto = `${identLower}@agents.local`;
+      const hash = await bcrypt.hash(String(password), 10);
+      user = await User.create({
+        name: ident,
+        email: emailAuto,
+        role: 'agent',
+        active: true,
+        passwordHash: hash,
+      });
+    }
+
+    if (!user || !user.passwordHash || user.active === false) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const ok = await bcrypt.compare(String(password), user.passwordHash || '');
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = jwt.sign(
@@ -83,10 +111,14 @@ router.post('/login-name', async (req, res) => {
       JWT_SECRET,
       { expiresIn: '10d' }
     );
-    res.json({ token, user: { name: user.name, email: user.email, role: user.role || 'agent' } });
-  } catch (e) {
-    console.error('Login-name error:', e);
-    res.status(500).json({ error: 'Login failed' });
+
+    return res.json({
+      token,
+      user: { name: user.name, email: user.email, role: user.role || 'agent' },
+    });
+  } catch (err) {
+    console.error('Login-name error:', err);
+    return res.status(500).json({ error: 'Login failed' });
   }
 });
 

@@ -1,4 +1,4 @@
-// backend/routes.js (full replacement)
+// backend/routes.js (full replacement with agent auto-create)
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
@@ -12,6 +12,7 @@ const Case = require('./models/Case');
 const Counter = require('./models/Counter');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const SEED_SECRET = process.env.SEED_SECRET || 'dev-seed';
 
 const ISSUE_TYPES = ['Plans', 'Billing', 'Technical', 'Activation', 'Shipping', 'Other'];
 const PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'];
@@ -35,7 +36,9 @@ function auth(req, res, next) {
   }
 }
 
-// ---------- Login (email + passwordHash fix) ----------
+const esc = (s='') => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// ---------- Login (email + passwordHash) ----------
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
@@ -61,20 +64,41 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ---------- Login by NAME (case-insensitive) ----------
+// ---------- Login by NAME (auto-create allowed agents) ----------
 router.post('/login-name', async (req, res) => {
   try {
     const { username, name, password } = req.body || {};
-    const ident = String(username || name || '').trim();
+    const identRaw = String(username || name || '').trim();
     const passIn = String(password || '');
-    if (!ident || !passIn) return res.status(400).json({ error: 'Name and password are required' });
+    if (!identRaw || !passIn) {
+      return res.status(400).json({ error: 'Name and password are required' });
+    }
+    const identLower = identRaw.toLowerCase();
 
-    const esc = (s='') => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const user =
-      (await User.findOne({ active: true, name: { $regex: `^${esc(ident)}$`, $options: 'i' } })) ||
-      (await User.findOne({ active: true, name: { $regex: esc(ident), $options: 'i' } }));
+    // Allowed agent names (case-insensitive)
+    const allowed = (process.env.AGENT_NAMES || 'Sheindy,Chayelle,Yenti,Tzivi,Roisy,Toby,Blimi')
+      .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
-    if (!(user && user.passwordHash)) return res.status(401).json({ error: 'Invalid credentials' });
+    // Find existing by exact name (case-insensitive)
+    let user =
+      (await User.findOne({ active: true, name: { $regex: `^${esc(identRaw)}$`, $options: 'i' } })) ||
+      (await User.findOne({ active: true, name: { $regex: esc(identRaw), $options: 'i' } }));
+
+    // Auto-create if missing and allowed
+    if (!user && allowed.includes(identLower)) {
+      const emailAuto = `${identLower}@agents.local`;
+      user = await User.create({
+        name: identRaw,
+        email: emailAuto,
+        role: 'agent',
+        active: true,
+        passwordHash: await bcrypt.hash(passIn, 10),
+      });
+    }
+
+    if (!(user && user.passwordHash) || user.active === false) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
     const ok = await bcrypt.compare(passIn, user.passwordHash || '');
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
@@ -90,6 +114,32 @@ router.post('/login-name', async (req, res) => {
     res.status(500).json({ error: 'Login failed' });
   }
 });
+
+// ---------- Optional: seed all 7 agents (GET; for convenience; /api alias too) ----------
+async function seedAgentsHandler(req, res) {
+  try {
+    if ((req.query.secret || '') !== SEED_SECRET) return res.status(403).json({ error: 'Forbidden' });
+    const pw = String(req.query.pw || 'Assistly1!');
+    const names = (process.env.AGENT_NAMES || 'Sheindy,Chayelle,Yenti,Tzivi,Roisy,Toby,Blimi')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const out = [];
+    for (const name of names) {
+      const email = `${name.toLowerCase()}@agents.local`;
+      let u = await User.findOne({ email });
+      if (!u) u = new User({ name, email, role: 'agent', active: true });
+      u.name = name; u.role = 'agent'; u.active = true;
+      u.passwordHash = await bcrypt.hash(pw, 10);
+      await u.save();
+      out.push({ name: u.name, email: u.email, role: u.role });
+    }
+    res.json({ ok: true, seeded: out.length, users: out });
+  } catch (e) {
+    console.error('seed-agents error:', e);
+    res.status(500).json({ error: 'Seed failed' });
+  }
+}
+router.get('/admin/seed-agents', seedAgentsHandler);
+router.get('/api/admin/seed-agents', seedAgentsHandler);
 
 // ---------- File uploads ----------
 const uploadsRoot = path.join(__dirname, '..', 'uploads');

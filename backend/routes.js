@@ -58,7 +58,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ---------- Login by NAME (or email) — auto-create known agents ----------
+// ---------- Login by NAME (or email) — auto-create allowed agents ----------
 router.post('/login-name', async (req, res) => {
   try {
     const { email, password, name, username } = req.body || {};
@@ -70,32 +70,29 @@ router.post('/login-name', async (req, res) => {
     const ident = identRaw.trim();
     const identLower = ident.toLowerCase();
 
-    // Allowed agent names (case-insensitive). You can also set ENV AGENT_NAMES if you prefer.
-    const allowed =
-      (process.env.AGENT_NAMES || 'Sheindy,Chayelle,Yenti,Tzivi,Roisy,Toby,Blimi')
-        .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    // The 7 allowed agent names (case-insensitive)
+    const allowed = ['sheindy','chayelle','yenti','tzivi','roisy','toby','blimi'];
 
-    // Find user: by email or by name (case-insensitive)
-    const escapeRegex = (s = '') => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Find existing user: by email or by name (case-insensitive)
+    const esc = (s = '') => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     let user = null;
     if (ident.includes('@')) {
       user = await User.findOne({ email: identLower, active: true });
     } else {
       user =
-        (await User.findOne({ active: true, name: { $regex: `^${escapeRegex(ident)}$`, $options: 'i' } })) ||
-        (await User.findOne({ active: true, name: { $regex: escapeRegex(ident), $options: 'i' } }));
+        (await User.findOne({ active: true, name: { $regex: `^${esc(ident)}$`, $options: 'i' } })) ||
+        (await User.findOne({ active: true, name: { $regex: esc(ident), $options: 'i' } }));
     }
 
-    // If not found, but the name is in our allowed list, auto-create the agent
-    if (!user && allowed.includes(identLower) && !ident.includes('@')) {
+    // If not found and the name is allowed, auto-create the agent with the provided password
+    if (!user && !ident.includes('@') && allowed.includes(identLower)) {
       const emailAuto = `${identLower}@agents.local`;
-      const hash = await bcrypt.hash(String(password), 10);
       user = await User.create({
         name: ident,
         email: emailAuto,
         role: 'agent',
         active: true,
-        passwordHash: hash,
+        passwordHash: await bcrypt.hash(String(password), 10),
       });
     }
 

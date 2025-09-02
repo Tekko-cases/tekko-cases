@@ -77,6 +77,12 @@ router.post('/login-name', async (req, res) => {
       (await User.findOne({ active: true, name: { $regex: `^${esc(identRaw)}$`, $options: 'i' } })) ||
       (await User.findOne({ active: true, name: { $regex: esc(identRaw), $options: 'i' } }));
 
+// Fallback: if not found by name, try the derived email from the seed (toby@agents.local, etc.)
+if (!user) {
+  const emailAuto = `${identLower}@agents.local`;
+  user = await User.findOne({ email: emailAuto, active: true });
+}
+
     // Auto-create if missing and allowed
     if (!user && allowed.includes(identLower)) {
       const emailAuto = `${identLower}@agents.local`;

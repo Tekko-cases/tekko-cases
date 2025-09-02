@@ -73,27 +73,27 @@ router.post('/login-name', async (req, res) => {
     const allowed = (process.env.AGENT_NAMES || 'Sheindy,Chayelle,Yenti,Tzivi,Roisy,Toby,Blimi')
       .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
-    let user =
-      (await User.findOne({ active: true, name: { $regex: `^${esc(identRaw)}$`, $options: 'i' } })) ||
-      (await User.findOne({ active: true, name: { $regex: esc(identRaw), $options: 'i' } }));
+// First try derived seed email (toby@agents.local, etc.)
+const emailAuto = `${identLower}@agents.local`;
+let user = await User.findOne({ email: emailAuto, active: true });
 
-// Fallback: if not found by name, try the derived email from the seed (toby@agents.local, etc.)
+// If not found by email, fall back to name (case-insensitive)
 if (!user) {
-  const emailAuto = `${identLower}@agents.local`;
-  user = await User.findOne({ email: emailAuto, active: true });
+  user =
+    (await User.findOne({ active: true, name: { $regex: `^${esc(identRaw)}$`, $options: 'i' } })) ||
+    (await User.findOne({ active: true, name: { $regex: esc(identRaw), $options: 'i' } }));
 }
 
-    // Auto-create if missing and allowed
-    if (!user && allowed.includes(identLower)) {
-      const emailAuto = `${identLower}@agents.local`;
-      user = await User.create({
-        name: identRaw,
-        email: emailAuto,
-        role: 'agent',
-        active: true,
-        passwordHash: await bcrypt.hash(passIn, 10),
-      });
-    }
+// Auto-create if still missing and allowed
+if (!user && allowed.includes(identLower)) {
+  user = await User.create({
+    name: identRaw,
+    email: emailAuto,
+    role: 'agent',
+    active: true,
+    passwordHash: await bcrypt.hash(passIn, 10),
+  });
+}
 
     if (!(user && user.passwordHash) || user.active === false) {
       return res.status(401).json({ error: 'Invalid credentials' });

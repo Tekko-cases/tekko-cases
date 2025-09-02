@@ -92,12 +92,12 @@ export async function searchCustomers(q) {
   if (!q) return [];
   const qs = encodeURIComponent(q || "");
 
-  // Use env base (no trailing slash), then try both endpoints; final hard fallback.
+  // Use env base (no trailing slash). Try both endpoints, with a last-resort fallback.
   const base = (API_BASE || "https://tekko-cases.onrender.com").replace(/\/+$/, "");
 
   const urls = [
     `${base}/api/customers/search?q=${qs}`,   // primary
-    `${base}/customers/search?q=${qs}`,       // fallback (also supported)
+    `${base}/customers/search?q=${qs}`,       // fallback (also supported on backend)
     `https://tekko-cases.onrender.com/api/customers/search?q=${qs}`, // last-resort
   ];
 
@@ -105,8 +105,8 @@ export async function searchCustomers(q) {
     try {
       const r = await fetch(u, { headers: { "Content-Type": "application/json" } });
       if (r.ok) return await r.json();
-    } catch (_) {
-      /* try next url */
+    } catch {
+      /* try next URL */
     }
   }
   return [];
@@ -133,7 +133,19 @@ export async function createCase(
   fd.append("data", JSON.stringify(payload));
   (files || []).forEach((f) => f && fd.append("files", f));
 
-  return await http.post("/cases", fd);
+  const base = (API_BASE || "https://tekko-cases.onrender.com").replace(/\/+$/, "");
+  const token = localStorage.getItem("token") || "";
+
+  const res = await fetch(`${base}/cases`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    // do NOT set Content-Type for FormData
+    body: fd,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || "Create case failed");
+  return data;
 }
 
 export async function addLog(caseId, note, files = []) {

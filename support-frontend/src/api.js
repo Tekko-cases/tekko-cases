@@ -89,7 +89,27 @@ export async function loginByName({ username, password }) {
 }
 
 export async function searchCustomers(q) {
-  return await http.get("/api/customers/search", { params: { q } });
+  if (!q) return [];
+  const qs = encodeURIComponent(q || "");
+
+  // Use env base (no trailing slash), then try both endpoints; final hard fallback.
+  const base = (API_BASE || "https://tekko-cases.onrender.com").replace(/\/+$/, "");
+
+  const urls = [
+    `${base}/api/customers/search?q=${qs}`,   // primary
+    `${base}/customers/search?q=${qs}`,       // fallback (also supported)
+    `https://tekko-cases.onrender.com/api/customers/search?q=${qs}`, // last-resort
+  ];
+
+  for (const u of urls) {
+    try {
+      const r = await fetch(u, { headers: { "Content-Type": "application/json" } });
+      if (r.ok) return await r.json();
+    } catch (_) {
+      /* try next url */
+    }
+  }
+  return [];
 }
 
 export async function listCases() {

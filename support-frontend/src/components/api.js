@@ -68,7 +68,7 @@ async function request(method, path, { params, data, headers } = {}) {
   }
 }
 
-// Axios-like surface
+// Axios-like surface (kept for compatibility with older calls)
 const http = {
   get: (path, config = {}) => request("GET", path, config),
   delete: (path, config = {}) => request("DELETE", path, config),
@@ -88,14 +88,35 @@ export async function loginByName({ username, password }) {
   return data;
 }
 
+// ---- Customer search (forces absolute API calls, with fallbacks) ----
 export async function searchCustomers(q) {
-  return await http.get("/api/customers/search", { params: { q } });
+  if (!q) return [];
+  const qs = encodeURIComponent(q || "");
+  const base = (API_BASE || "https://tekko-cases.onrender.com").replace(/\/+$/, "");
+
+  const urls = [
+    `${base}/api/customers/search?q=${qs}`,   // primary
+    `${base}/customers/search?q=${qs}`,       // fallback (also supported on backend)
+    // last-resort hard fallback in case env/base wasn’t picked up
+    `https://tekko-cases.onrender.com/api/customers/search?q=${qs}`,
+  ];
+
+  for (const u of urls) {
+    try {
+      const r = await fetch(u, { headers: { "Content-Type": "application/json" } });
+      if (r.ok) return await r.json();
+    } catch {
+      // try next URL
+    }
+  }
+  return [];
 }
 
 export async function listCases() {
   return await http.get("/cases");
 }
 
+// ---- Create case (explicit fetch so token + FormData are guaranteed) ----
 export async function createCase(
   { title, description, customerId, customerName, issueType, priority },
   files = []
@@ -113,14 +134,39 @@ export async function createCase(
   fd.append("data", JSON.stringify(payload));
   (files || []).forEach((f) => f && fd.append("files", f));
 
-  return await http.post("/cases", fd);
+  const base = (API_BASE || "https://tekko-cases.onrender.com").replace(/\/+$/, "");
+  const token = localStorage.getItem("token") || "";
+
+  const res = await fetch(`${base}/cases`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    // do NOT set Content-Type for FormData
+    body: fd,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || "Create case failed");
+  return data;
 }
 
+// ---- Add log (also explicit to guarantee token with FormData) ----
 export async function addLog(caseId, note, files = []) {
   const fd = new FormData();
   fd.append("note", note || "");
   (files || []).forEach((f) => f && fd.append("files", f));
-  return await http.post(`/cases/${caseId}/logs`, fd);
+
+  const base = (API_BASE || "https://tekko-cases.onrender.com").replace(/\/+$/, "");
+  const token = localStorage.getItem("token") || "";
+
+  const res = await fetch(`${base}/cases/${caseId}/logs`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || "Add log failed");
+  return data;
 }
 
 // Default export is the axios-like object, but also include helpers on it:

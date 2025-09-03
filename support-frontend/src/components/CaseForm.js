@@ -1,5 +1,5 @@
 // CaseForm.js — FULL REPLACEMENT
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 const API_BASE =
   (process.env.REACT_APP_API_URL && process.env.REACT_APP_API_URL.replace(/\/+$/, '')) ||
@@ -22,6 +22,34 @@ export default function CaseForm({ onCreated }) {
   const [customerId, setCustomerId] = useState(null);
   const [customerName, setCustomerName] = useState('');
 
+// ---- Customer search UI state ----
+const [customerQuery, setCustomerQuery] = useState('');
+const [customerOptions, setCustomerOptions] = useState([]);
+
+// Debounced fetch to Square proxy as the user types
+useEffect(() => {
+  const q = customerQuery.trim();
+  if (q.length < 2) { setCustomerOptions([]); return; }
+
+  const ctrl = new AbortController();
+  fetch(`${API_BASE}/api/customers/search?q=${encodeURIComponent(q)}`, {
+    signal: ctrl.signal,
+    headers: { 'Content-Type': 'application/json' },
+  })
+    .then(r => (r.ok ? r.json() : []))
+    .then(list => setCustomerOptions(Array.isArray(list) ? list : []))
+    .catch(() => setCustomerOptions([]));
+
+  return () => ctrl.abort();
+}, [customerQuery]);
+
+function pickCustomer(c) {
+  setCustomerId(c.id || null);
+  setCustomerName(c.name || '');
+  setCustomerQuery(c.name || '');
+  setCustomerOptions([]);
+}
+
   async function handleSubmit(e) {
     e.preventDefault();
 
@@ -31,7 +59,7 @@ export default function CaseForm({ onCreated }) {
         title: title.trim(),
         description: description.trim(),
         customerId,
-        customerName,
+        customerName: customerName || customerQuery,
         issueType,
         priority,
         // agent auto-assigns on the backend from the login token
@@ -69,6 +97,63 @@ export default function CaseForm({ onCreated }) {
   return (
     <form onSubmit={handleSubmit} style={styles.card}>
       <h3 style={styles.heading}>Create New Case</h3>
+{/* Customer details (Square search) */}
+<div style={{ position: 'relative', marginTop: 8 }}>
+  <label style={styles.label}>Customer details</label>
+  <input
+    style={styles.input}
+    placeholder="Start typing a name, phone, or email"
+    value={customerQuery}
+    onChange={(e) => {
+      setCustomerQuery(e.target.value);
+      setCustomerId(null);
+      setCustomerName('');
+    }}
+    autoComplete="off"
+  />
+
+  {/* Suggestions dropdown */}
+  {customerOptions.length > 0 && (
+    <div
+      style={{
+        position: 'absolute',
+        top: 'calc(100% + 6px)',
+        left: 0,
+        right: 0,
+        background: '#fff',
+        border: '1px solid #ddd',
+        borderRadius: 10,
+        boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+        zIndex: 9999,
+        maxHeight: 240,
+        overflowY: 'auto',
+      }}
+    >
+      {customerOptions.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); pickCustomer(c); }}
+          style={{
+            width: '100%',
+            textAlign: 'left',
+            padding: '10px 12px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+          }}
+          onMouseOver={(e) => (e.currentTarget.style.background = '#f7f7f7')}
+          onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          <div style={{ fontWeight: 600 }}>{c.name || 'Unnamed'}</div>
+          <div style={{ fontSize: 12, color: '#666' }}>
+            {(c.phone || '') + ((c.phone && c.email) ? ' · ' : '') + (c.email || '')}
+          </div>
+        </button>
+      ))}
+    </div>
+  )}
+</div>
 
       {/* Top row: Title + Phone */}
       <div style={styles.row}>

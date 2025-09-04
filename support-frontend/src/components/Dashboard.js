@@ -52,7 +52,7 @@ export default function Dashboard({ onLogout, user }) {
     if (val.length < 2) { setSuggestions([]); return; }
     try {
       const r = await api.get('/api/customers/search', { params: { q: val } });
-      setSuggestions(r.data || []);
+      setSuggestions(Array.isArray(r) ? r : (r?.data || []));
     } catch {
       setSuggestions([]);
     }

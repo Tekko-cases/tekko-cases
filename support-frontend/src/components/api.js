@@ -57,8 +57,9 @@ async function request(method, path, { params, data, headers } = {}) {
     signal: controller.signal,
   };
 
+  // Body handling
   if (data instanceof FormData) {
-    opts.body = data; // do NOT set Content-Type
+    opts.body = data; // keep browser-set Content-Type for multipart
   } else if (data !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(data);
@@ -66,11 +67,31 @@ async function request(method, path, { params, data, headers } = {}) {
 
   try {
     const res = await fetch(url, opts);
-    const text = await res.text();
-    let json;
-    try { json = text ? JSON.parse(text) : {}; } catch { json = { data: text }; }
-    if (!res.ok) throw new Error(json?.error || json?.message || `${res.status}`);
-    return json;
+
+    // Try to parse JSON; fall back to text so we always see the reason.
+    const readBody = async () => {
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        try { return await res.json(); } catch { return {}; }
+      }
+      try { return { error: await res.text() }; } catch { return {}; }
+    };
+
+    const body = await readBody();
+
+    if (!res.ok) {
+      const msg =
+        body?.error ||
+        body?.message ||
+        (typeof body === "string" ? body : "") ||
+        `HTTP ${res.status}`;
+      const err = new Error(msg);
+      err.status = res.status;
+      err.body = body;
+      throw err;
+    }
+
+    return body;
   } finally {
     clearTimeout(id);
   }

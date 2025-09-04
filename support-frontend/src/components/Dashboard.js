@@ -55,7 +55,7 @@ export default function Dashboard({ onLogout, user }) {
 
   const loadAgents = useCallback(async () => {
     try {
-       const r = await api.get('/api/agents'); // backend route
+       const r = await api.get('/api/agents');
       setAgents(r.data || []);
     } catch { setAgents([]); }
   }, []);

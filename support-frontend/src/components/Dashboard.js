@@ -3,7 +3,8 @@ import { api, API_BASE } from './api';
 import './Dashboard.css';
 
 const ISSUE_TYPES = ['Product info', 'Plans', 'Rentals', 'Shipping', 'Product support', 'Other'];
-const PRIORITIES  = ['Low', 'Medium', 'High'];
+// CHANGED: Priority set as requested
+const PRIORITIES  = ['Low', 'Normal', 'High', 'Urgent'];
 
 export default function Dashboard({ onLogout, user }) {
   // Top nav: create | filters | cases
@@ -39,7 +40,8 @@ export default function Dashboard({ onLogout, user }) {
     customerPhone: '',
     issueType: '',
     description: '',
-    priority: '',
+    // CHANGED: default to Normal
+    priority: 'Normal',
     status: 'Open',
   });
   const [extraPhones, setExtraPhones] = useState([]); // subtle extra numbers
@@ -111,8 +113,13 @@ export default function Dashboard({ onLogout, user }) {
         return;
       }
 
+      // CHANGED: guard priority before sending
+      const allowedPriorities = new Set(PRIORITIES);
+      const safePriority = allowedPriorities.has(newCase.priority) ? newCase.priority : 'Normal';
+
       const payload = {
         ...newCase,
+        priority: safePriority, // ensure safe value
         agent: user?.name || '',
         // store all numbers in one field so backend always persists them
         customerPhone: allPhones.join(', ')
@@ -125,7 +132,7 @@ export default function Dashboard({ onLogout, user }) {
 
       setNewCase({
         customerId: '', customerName: '', customerEmail: '', customerPhone: '',
-        issueType: '', description: '', priority: '', status: 'Open'
+        issueType: '', description: '', priority: 'Normal', status: 'Open' // keep default on reset
       });
       setExtraPhones([]);
       setCaseFiles([]);

@@ -1,3 +1,4 @@
+// support-frontend/src/components/Dashboard.js
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { api, API_BASE } from './api';
 import './Dashboard.css';
@@ -28,8 +29,9 @@ export default function Dashboard({ onLogout, user }) {
 
   // Sorting
   const [sort, setSort] = useState({ key: 'caseNumber', dir: 'desc' });
-  const sortIndicator = (key) => sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-  const toggleSort = (key) => setSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  const sortIndicator = (key) => (sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+  const toggleSort = (key) =>
+    setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
 
   // New case
   const [newCase, setNewCase] = useState({
@@ -67,17 +69,22 @@ export default function Dashboard({ onLogout, user }) {
     try {
       const r = await api.get('/api/agents');
       setAgents(r.data || []);
-    } catch { setAgents([]); }
+    } catch {
+      setAgents([]);
+    }
   }, []);
 
   const loadCases = useCallback(async () => {
     const params = { ...filters, status: statusForTab, page, pageSize };
     try {
-      // ✅ correct path (no /api)
+      // correct path (no /api)
       const r = await api.get('/cases', { params });
-      setCases(r.data?.items || r.items || []);
-      setTotal(r.data?.total ?? r.total ?? 0);
-    } catch { setCases([]); setTotal(0); }
+      setCases(r?.data?.items || r?.items || []);
+      setTotal(r?.data?.total ?? r?.total ?? 0);
+    } catch {
+      setCases([]);
+      setTotal(0);
+    }
   }, [filters, page, pageSize, statusForTab]);
 
   useEffect(() => { loadAgents(); }, [loadAgents]);
@@ -91,7 +98,8 @@ export default function Dashboard({ onLogout, user }) {
       const av = a?.[key] ?? '';
       const bv = b?.[key] ?? '';
       if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
-      const A = String(av).toLowerCase(); const B = String(bv).toLowerCase();
+      const A = String(av).toLowerCase();
+      const B = String(bv).toLowerCase();
       if (A < B) return dir === 'asc' ? -1 : 1;
       if (A > B) return dir === 'asc' ? 1 : -1;
       return 0;
@@ -100,79 +108,90 @@ export default function Dashboard({ onLogout, user }) {
   }, [cases, sort]);
 
   // Create case — agent = logged-in user; phone required if new customer
-const createCase = async () => {
-  try {
-    if (!newCase.customerName || !newCase.issueType || !newCase.priority) {
-      alert('Please fill in Customer, Issue type, and Priority.');
-      return;
+  const createCase = async () => {
+    try {
+      if (!newCase.customerName || !newCase.issueType || !newCase.priority) {
+        alert('Please fill in Customer, Issue type, and Priority.');
+        return;
+      }
+
+      // Require at least one phone for new customers
+      const allPhones = [newCase.customerPhone, ...extraPhones]
+        .map((s) => String(s || '').trim())
+        .filter(Boolean);
+      if (!newCase.customerId && allPhones.length === 0) {
+        alert('Please enter a contact number for new customers.');
+        return;
+      }
+
+      // Backend needs a title. Derive it automatically so the UI can stay clean.
+      const descFirst = (newCase.description || '').trim().split('\n').find(Boolean) || '';
+      const computedTitle =
+        descFirst ||
+        `${newCase.issueType || 'Issue'} — ${newCase.customerName || 'Customer'}` ||
+        'New case';
+
+      const payload = {
+        title: computedTitle,
+        description: newCase.description || '',
+        customerId: newCase.customerId || null,
+        customerName: newCase.customerName || '',
+        issueType: newCase.issueType || 'Other',
+        priority: newCase.priority || 'Normal',
+        agent: user?.name || '',
+        // store all numbers together
+        customerPhone: allPhones.join(', '),
+      };
+
+      const fd = new FormData();
+      fd.append('data', JSON.stringify(payload));
+      (caseFiles || []).forEach((f) => f && fd.append('files', f));
+
+      // Correct endpoint (no /api)
+      await api.post('/cases', fd);
+
+      // Reset & refresh
+      setNewCase({
+        customerId: '', customerName: '', customerEmail: '', customerPhone: '',
+        issueType: '', description: '', priority: '', status: 'Open',
+      });
+      setExtraPhones([]);
+      setCaseFiles([]);
+      setScreen('cases');
+      await loadCases();
+      alert('Case created.');
+    } catch (err) {
+      console.error(err);
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to create case';
+      alert('Create case failed: ' + msg);
     }
-
-    // Require at least one phone for new customers
-    const allPhones = [newCase.customerPhone, ...extraPhones]
-      .map(s => String(s || '').trim())
-      .filter(Boolean);
-    if (!newCase.customerId && allPhones.length === 0) {
-      alert('Please enter a contact number for new customers.');
-      return;
-    }
-
-    // ✅ ADD A TITLE (backend requires it)
-    const computedTitle =
-      (newCase.description || '').trim().split('\n')[0] ||            // first line of description
-      `${newCase.issueType || 'Issue'} — ${newCase.customerName || 'Customer'}`;
-
-    const payload = {
-      ...newCase,
-      title: computedTitle,                       // <-- important
-      agent: user?.name || '',
-      customerPhone: allPhones.join(', '),        // store all numbers together
-    };
-
-    const fd = new FormData();
-    fd.append('data', JSON.stringify(payload));
-    (caseFiles || []).forEach(f => fd.append('files', f));
-
-    // Correct endpoint (no /api)
-    await api.post('/cases', fd);
-
-    // Reset & refresh
-    setNewCase({
-      customerId: '', customerName: '', customerEmail: '', customerPhone: '',
-      issueType: '', description: '', priority: '', status: 'Open'
-    });
-    setExtraPhones([]);
-    setCaseFiles([]);
-    setScreen('cases');
-    await loadCases();
-    alert('Case created.');
-  } catch (err) {
-    console.error(err);
-    const msg =
-      err?.response?.data?.error ||
-      err?.response?.data?.message ||
-      err?.message ||
-      'Failed to create case';
-    alert('Create case failed: ' + msg);
-  }
-};
+  };
 
   const closeCase = async (id) => {
     try {
       const solutionSummary = window.prompt('Add a brief solution summary before closing:');
       if (!solutionSummary) return;
-      // ✅ correct path (no /api)
       await api.put(`/cases/${id}`, { status: 'Closed', solutionSummary });
       await loadCases();
-    } catch (e) { console.error(e); alert('Failed to close case'); }
+    } catch (e) {
+      console.error(e);
+      alert('Failed to close case');
+    }
   };
 
   const reopenCase = async (id) => {
     try {
-      // ✅ correct path (no /api)
       await api.put(`/cases/${id}`, { status: 'Open' });
       setTab('active');
       await loadCases();
-    } catch (e) { console.error(e); alert('Failed to reopen case'); }
+    } catch (e) {
+      console.error(e);
+      alert('Failed to reopen case');
+    }
   };
 
   const addLog = async () => {
@@ -181,10 +200,9 @@ const createCase = async () => {
       const fd = new FormData();
       fd.append('agent', user?.name || '');
       fd.append('note', logNote);
-      (logFiles || []).forEach(f => fd.append('files', f));
-      // ✅ correct path (no /api)
+      (logFiles || []).forEach((f) => f && fd.append('files', f));
       const r = await api.post(`/cases/${expandedCase._id}/logs`, fd);
-      setExpandedCase(r.data || r); // refresh inline case
+      setExpandedCase(r?.data || r); // refresh inline case
       setLogNote('');
       setLogFiles([]);
       await loadCases();
@@ -195,19 +213,39 @@ const createCase = async () => {
     }
   };
 
-  function applyFilters(e) { if (e) e.preventDefault(); setFilters(filtersLocal); setPage(1); setScreen('cases'); }
-  function resetFilters()   { const empty = { q: '', issueType: '', agent: '', priority: '' }; setFiltersLocal(empty); setFilters(empty); setPage(1); }
+  function applyFilters(e) {
+    if (e) e.preventDefault();
+    setFilters(filtersLocal);
+    setPage(1);
+    setScreen('cases');
+  }
+  function resetFilters() {
+    const empty = { q: '', issueType: '', agent: '', priority: '' };
+    setFiltersLocal(empty);
+    setFilters(empty);
+    setPage(1);
+  }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const Nav = () => (
-    <nav style={{ display:'flex', gap:8, alignItems:'center' }}>
-      <button className={`btn ${screen==='create' ? 'primary' : ''}`} onClick={() => setScreen('create')}>Create case</button>
-      <button className={`btn ${screen==='filters' ? 'primary' : ''}`} onClick={() => setScreen('filters')}>Filters & Search</button>
-      <button className={`btn ${screen==='cases' ? 'primary' : ''}`} onClick={() => setScreen('cases')}>Cases</button>
-      <div style={{ flex:1 }} />
+    <nav style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <button className={`btn ${screen === 'create' ? 'primary' : ''}`} onClick={() => setScreen('create')}>
+        Create case
+      </button>
+      <button className={`btn ${screen === 'filters' ? 'primary' : ''}`} onClick={() => setScreen('filters')}>
+        Filters & Search
+      </button>
+      <button className={`btn ${screen === 'cases' ? 'primary' : ''}`} onClick={() => setScreen('cases')}>
+        Cases
+      </button>
+      <div style={{ flex: 1 }} />
       {user && <span className="muted">Signed in as {user.name}</span>}
-      {typeof onLogout === 'function' && <button className="btn" onClick={onLogout}>Log out</button>}
+      {typeof onLogout === 'function' && (
+        <button className="btn" onClick={onLogout}>
+          Log out
+        </button>
+      )}
     </nav>
   );
 
@@ -235,7 +273,9 @@ const createCase = async () => {
                     setNewCase({
                       ...newCase,
                       customerName: val,
-                      customerId: '', customerEmail: '', customerPhone: '',
+                      customerId: '',
+                      customerEmail: '',
+                      customerPhone: '',
                     });
                     fetchSuggestions(val);
                   }}
@@ -243,7 +283,7 @@ const createCase = async () => {
                 />
                 {suggestions.length > 0 && (
                   <div className="menu">
-                    {suggestions.map(s => (
+                    {suggestions.map((s) => (
                       <div
                         key={s.id}
                         className="item"
@@ -253,7 +293,7 @@ const createCase = async () => {
                             customerId: s.id,
                             customerName: s.name || '',
                             customerEmail: s.email || '',
-                            customerPhone: s.phone || ''
+                            customerPhone: s.phone || '',
                           });
                           setSuggestions([]);
                         }}
@@ -279,16 +319,16 @@ const createCase = async () => {
                   type="button"
                   className="btn"
                   style={{ padding: 0, fontSize: 12, background: 'transparent', textDecoration: 'underline' }}
-                  onClick={() => setExtraPhones(p => [...p, ''])}
+                  onClick={() => setExtraPhones((p) => [...p, ''])}
                 >
                   + Add another number
                 </button>
                 {extraPhones.map((ph, i) => (
                   <input
                     key={i}
-                    placeholder={`Extra number ${i+1}`}
+                    placeholder={`Extra number ${i + 1}`}
                     value={ph}
-                    onChange={e => {
+                    onChange={(e) => {
                       const copy = [...extraPhones];
                       copy[i] = e.target.value;
                       setExtraPhones(copy);
@@ -301,30 +341,41 @@ const createCase = async () => {
               <textarea
                 placeholder="Description"
                 value={newCase.description}
-                onChange={e => setNewCase({ ...newCase, description: e.target.value })}
+                onChange={(e) => setNewCase({ ...newCase, description: e.target.value })}
               />
 
-              <select value={newCase.issueType} onChange={e => setNewCase({ ...newCase, issueType: e.target.value })}>
+              <select value={newCase.issueType} onChange={(e) => setNewCase({ ...newCase, issueType: e.target.value })}>
                 <option value="">Issue type</option>
-                {ISSUE_TYPES.map(x => <option key={x} value={x}>{x}</option>)}
+                {ISSUE_TYPES.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
               </select>
 
-              <select value={newCase.priority} onChange={e => setNewCase({ ...newCase, priority: e.target.value })}>
+              <select value={newCase.priority} onChange={(e) => setNewCase({ ...newCase, priority: e.target.value })}>
                 <option value="">Priority</option>
-                {PRIORITIES.map(x => <option key={x} value={x}>{x}</option>)}
+                {PRIORITIES.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
               </select>
 
-              <input type="file" multiple onChange={e => setCaseFiles(Array.from(e.target.files || []))} />
+              <input type="file" multiple onChange={(e) => setCaseFiles(Array.from(e.target.files || []))} />
             </div>
 
             {(newCase.customerEmail || newCase.customerPhone || extraPhones.length > 0) && (
               <div className="muted" style={{ marginTop: 8 }}>
-                <b>Customer details:</b> {newCase.customerEmail || '—'} · {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '—'}
+                <b>Customer details:</b> {newCase.customerEmail || '—'} ·{' '}
+                {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '—'}
               </div>
             )}
 
             <div className="actions-row">
-              <button className="btn primary" onClick={createCase}>Create Case</button>
+              <button className="btn primary" onClick={createCase}>
+                Create Case
+              </button>
             </div>
           </div>
         </section>
@@ -336,31 +387,55 @@ const createCase = async () => {
           <div className="card">
             <div className="card-title">Filters & Search</div>
             <form onSubmit={applyFilters}>
-              <input placeholder="Search (customer, description, logs…)"
-                     value={filtersLocal.q}
-                     onChange={e => setFiltersLocal({ ...filtersLocal, q: e.target.value })} />
+              <input
+                placeholder="Search (customer, description, logs…)"
+                value={filtersLocal.q}
+                onChange={(e) => setFiltersLocal({ ...filtersLocal, q: e.target.value })}
+              />
 
-              <select value={filtersLocal.issueType}
-                      onChange={e => setFiltersLocal({ ...filtersLocal, issueType: e.target.value })}>
+              <select
+                value={filtersLocal.issueType}
+                onChange={(e) => setFiltersLocal({ ...filtersLocal, issueType: e.target.value })}
+              >
                 <option value="">Issue type (all)</option>
-                {ISSUE_TYPES.map(x => <option key={x} value={x}>{x}</option>)}
+                {ISSUE_TYPES.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
               </select>
 
-              <select value={filtersLocal.agent}
-                      onChange={e => setFiltersLocal({ ...filtersLocal, agent: e.target.value })}>
+              <select
+                value={filtersLocal.agent}
+                onChange={(e) => setFiltersLocal({ ...filtersLocal, agent: e.target.value })}
+              >
                 <option value="">Agent (all)</option>
-                {agents.map(a => <option key={a._id || a.name} value={a.name}>{a.name}</option>)}
+                {agents.map((a) => (
+                  <option key={a._id || a.name} value={a.name}>
+                    {a.name}
+                  </option>
+                ))}
               </select>
 
-              <select value={filtersLocal.priority}
-                      onChange={e => setFiltersLocal({ ...filtersLocal, priority: e.target.value })}>
+              <select
+                value={filtersLocal.priority}
+                onChange={(e) => setFiltersLocal({ ...filtersLocal, priority: e.target.value })}
+              >
                 <option value="">Priority (all)</option>
-                {PRIORITIES.map(x => <option key={x} value={x}>{x}</option>)}
+                {PRIORITIES.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
               </select>
 
               <div className="actions-row">
-                <button type="button" className="btn" onClick={resetFilters}>Reset</button>
-                <button className="btn primary" type="submit">Apply</button>
+                <button type="button" className="btn" onClick={resetFilters}>
+                  Reset
+                </button>
+                <button className="btn primary" type="submit">
+                  Apply
+                </button>
               </div>
             </form>
           </div>
@@ -371,8 +446,12 @@ const createCase = async () => {
       {screen === 'cases' && (
         <>
           <div className="tabs" style={{ maxWidth: 1100, margin: '8px auto' }}>
-            <button className={`tab ${tab==='active' ? 'active' : ''}`} onClick={() => setTab('active')}>Open</button>
-            <button className={`tab ${tab==='archived' ? 'active' : ''}`} onClick={() => setTab('archived')}>Archived</button>
+            <button className={`tab ${tab === 'active' ? 'active' : ''}`} onClick={() => setTab('active')}>
+              Open
+            </button>
+            <button className={`tab ${tab === 'archived' ? 'active' : ''}`} onClick={() => setTab('archived')}>
+              Archived
+            </button>
           </div>
 
           <section className="col" style={{ maxWidth: 1100, margin: '0 auto' }}>
@@ -382,20 +461,36 @@ const createCase = async () => {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th className="th-sort" onClick={() => toggleSort('caseNumber')}># {sortIndicator('caseNumber')}</th>
-                      <th className="th-sort" onClick={() => toggleSort('customerName')}>Customer {sortIndicator('customerName')}</th>
-                      <th className="th-sort" onClick={() => toggleSort('issueType')}>Issue {sortIndicator('issueType')}</th>
-                      <th className="th-sort" onClick={() => toggleSort('priority')}>Priority {sortIndicator('priority')}</th>
-                      <th className="th-sort" onClick={() => toggleSort('agent')}>Agent {sortIndicator('agent')}</th>
-                      <th className="th-sort" onClick={() => toggleSort('status')}>Status {sortIndicator('status')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('caseNumber')}>
+                        # {sortIndicator('caseNumber')}
+                      </th>
+                      <th className="th-sort" onClick={() => toggleSort('customerName')}>
+                        Customer {sortIndicator('customerName')}
+                      </th>
+                      <th className="th-sort" onClick={() => toggleSort('issueType')}>
+                        Issue {sortIndicator('issueType')}
+                      </th>
+                      <th className="th-sort" onClick={() => toggleSort('priority')}>
+                        Priority {sortIndicator('priority')}
+                      </th>
+                      <th className="th-sort" onClick={() => toggleSort('agent')}>
+                        Agent {sortIndicator('agent')}
+                      </th>
+                      <th className="th-sort" onClick={() => toggleSort('status')}>
+                        Status {sortIndicator('status')}
+                      </th>
                       <th style={{ width: 220 }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedCases.length === 0 && (
-                      <tr><td colSpan={7} style={{ padding: 16, color: '#6b7280' }}>No cases.</td></tr>
+                      <tr>
+                        <td colSpan={7} style={{ padding: 16, color: '#6b7280' }}>
+                          No cases.
+                        </td>
+                      </tr>
                     )}
-                    {sortedCases.map(c => {
+                    {sortedCases.map((c) => {
                       const expanded = expandedCase && expandedCase._id === c._id;
                       return (
                         <React.Fragment key={c._id}>
@@ -408,20 +503,27 @@ const createCase = async () => {
                               </div>
                             </td>
                             <td>{c.issueType}</td>
-                            <td><span className={`chip ${String(c.priority).toLowerCase()}`}>{c.priority}</span></td>
+                            <td>
+                              <span className={`chip ${String(c.priority).toLowerCase()}`}>{c.priority}</span>
+                            </td>
                             <td>{c.agent}</td>
-                            <td><span className={`chip ${c.status === 'Open' ? 'open' : 'closed'}`}>{c.status}</span></td>
+                            <td>
+                              <span className={`chip ${c.status === 'Open' ? 'open' : 'closed'}`}>{c.status}</span>
+                            </td>
                             <td>
                               <div className="actions-inline">
-                                <button
-                                  className="btn ghost"
-                                  onClick={() => setExpandedCase(expanded ? null : c)}
-                                >
+                                <button className="btn ghost" onClick={() => setExpandedCase(expanded ? null : c)}>
                                   {expanded ? 'Hide' : 'View'}
                                 </button>
-                                {c.status !== 'Closed'
-                                  ? <button className="btn ghost" onClick={() => closeCase(c._id)}>Close</button>
-                                  : <button className="btn ghost" onClick={() => reopenCase(c._id)}>Reopen</button>}
+                                {c.status !== 'Closed' ? (
+                                  <button className="btn ghost" onClick={() => closeCase(c._id)}>
+                                    Close
+                                  </button>
+                                ) : (
+                                  <button className="btn ghost" onClick={() => reopenCase(c._id)}>
+                                    Reopen
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -438,28 +540,43 @@ const createCase = async () => {
                                   </div>
 
                                   <div className="grid2">
-                                    <input type="file" multiple onChange={e => setLogFiles(Array.from(e.target.files || []))} />
-                                    <textarea placeholder="Note…" value={logNote} onChange={e => setLogNote(e.target.value)} />
+                                    <input
+                                      type="file"
+                                      multiple
+                                      onChange={(e) => setLogFiles(Array.from(e.target.files || []))}
+                                    />
+                                    <textarea
+                                      placeholder="Note…"
+                                      value={logNote}
+                                      onChange={(e) => setLogNote(e.target.value)}
+                                    />
                                   </div>
                                   <div className="actions-row">
-                                    <button className="btn primary" onClick={addLog}>Add log</button>
+                                    <button className="btn primary" onClick={addLog}>
+                                      Add log
+                                    </button>
                                   </div>
 
                                   <ul className="loglist">
-                                    {(expandedCase.logs || []).slice().reverse().map((log, i) => (
-                                      <li key={i}>
-                                        <b>{log.author}</b>
-                                        <span className="muted"> — {new Date(log.at).toLocaleString()}</span>
-                                        <div>{log.message}</div>
-                                        {Array.isArray(log.files) && log.files.length > 0 && (
-                                          <div className="thumbs">
-                                            {log.files.map((u, j) => (
-                                              <a key={j} href={`${API_BASE}${u}`} target="_blank" rel="noreferrer">Attachment {j + 1}</a>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </li>
-                                    ))}
+                                    {(expandedCase.logs || [])
+                                      .slice()
+                                      .reverse()
+                                      .map((log, i) => (
+                                        <li key={i}>
+                                          <b>{log.author}</b>
+                                          <span className="muted"> — {new Date(log.at).toLocaleString()}</span>
+                                          <div>{log.message}</div>
+                                          {Array.isArray(log.files) && log.files.length > 0 && (
+                                            <div className="thumbs">
+                                              {log.files.map((u, j) => (
+                                                <a key={j} href={`${API_BASE}${u}`} target="_blank" rel="noreferrer">
+                                                  Attachment {j + 1}
+                                                </a>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </li>
+                                      ))}
                                   </ul>
                                 </div>
                               </td>
@@ -474,10 +591,17 @@ const createCase = async () => {
 
               {/* Pagination */}
               <div className="pagination">
-                <button className="btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
+                <button className="btn" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                  Prev
+                </button>
                 <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
-                <button className="btn" disabled={page >= Math.max(1, Math.ceil(total / pageSize))}
-                        onClick={() => setPage(p => p + 1)}>Next</button>
+                <button
+                  className="btn"
+                  disabled={page >= Math.max(1, Math.ceil(total / pageSize))}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </button>
               </div>
             </div>
           </section>

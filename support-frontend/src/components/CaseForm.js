@@ -1,4 +1,4 @@
-// CaseForm.js — FULL REPLACEMENT
+// CaseForm.js — FULL REPLACEMENT (with Square customer search dropdown)
 import React, { useState, useEffect } from 'react';
 
 const API_BASE =
@@ -18,64 +18,59 @@ export default function CaseForm({ onCreated }) {
   const [priority, setPriority] = useState('Low');
   const [files, setFiles] = useState([]);
 
-  // If your customer search sets these, great; otherwise they default empty and backend handles it.
+  // Customer selection (id/name are what we send to the backend)
   const [customerId, setCustomerId] = useState(null);
   const [customerName, setCustomerName] = useState('');
 
-// ---- Customer search UI state ----
-const [customerQuery, setCustomerQuery] = useState('');
-const [customerOptions, setCustomerOptions] = useState([]);
+  // ---- Square search UI state ----
+  const [customerQuery, setCustomerQuery] = useState('');      // what the agent types
+  const [customerOptions, setCustomerOptions] = useState([]);  // results dropdown
 
-// Debounced fetch to Square proxy as the user types
-useEffect(() => {
-  const q = customerQuery.trim();
-  if (q.length < 2) { setCustomerOptions([]); return; }
+  // Fetch Square results while typing
+  useEffect(() => {
+    const q = customerQuery.trim();
+    if (q.length < 2) { setCustomerOptions([]); return; }
 
-  const ctrl = new AbortController();
-  fetch(`${API_BASE}/api/customers/search?q=${encodeURIComponent(q)}`, {
-    signal: ctrl.signal,
-    headers: { 'Content-Type': 'application/json' },
-  })
-    .then(r => (r.ok ? r.json() : []))
-    .then(list => setCustomerOptions(Array.isArray(list) ? list : []))
-    .catch(() => setCustomerOptions([]));
+    const ctrl = new AbortController();
+    fetch(`${API_BASE}/api/customers/search?q=${encodeURIComponent(q)}`, {
+      signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then(r => (r.ok ? r.json() : []))
+      .then(list => setCustomerOptions(Array.isArray(list) ? list : []))
+      .catch(() => setCustomerOptions([]));
 
-  return () => ctrl.abort();
-}, [customerQuery]);
+    return () => ctrl.abort();
+  }, [customerQuery]);
 
-function pickCustomer(c) {
-  setCustomerId(c.id || null);
-  setCustomerName(c.name || '');
-  setCustomerQuery(c.name || '');
-  setCustomerOptions([]);
-}
+  function pickCustomer(c) {
+    setCustomerId(c.id || null);
+    setCustomerName(c.name || '');
+    setCustomerQuery(c.name || '');
+    setCustomerOptions([]);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
-
     try {
-      // Build payload the backend expects
       const payload = {
         title: title.trim(),
         description: description.trim(),
         customerId,
-        customerName: customerName || customerQuery,
+        customerName: customerName || customerQuery, // use typed name if no pick
         issueType,
         priority,
-        // agent auto-assigns on the backend from the login token
       };
 
-      // Multipart with "data" JSON + "files"
       const fd = new FormData();
       fd.append('data', JSON.stringify(payload));
       for (const f of files) fd.append('files', f);
 
       const res = await fetch(`${API_BASE}/cases`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }, // IMPORTANT
+        headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Create case failed');
 
@@ -97,65 +92,65 @@ function pickCustomer(c) {
   return (
     <form onSubmit={handleSubmit} style={styles.card}>
       <h3 style={styles.heading}>Create New Case</h3>
-{/* Customer details (Square search) */}
-<div style={{ position: 'relative', marginTop: 8 }}>
-  <label style={styles.label}>Customer details</label>
-  <input
-    style={styles.input}
-    placeholder="Start typing a name, phone, or email"
-    value={customerQuery}
-    onChange={(e) => {
-      setCustomerQuery(e.target.value);
-      setCustomerId(null);
-      setCustomerName('');
-    }}
-    autoComplete="off"
-  />
 
-  {/* Suggestions dropdown */}
-  {customerOptions.length > 0 && (
-    <div
-      style={{
-        position: 'absolute',
-        top: 'calc(100% + 6px)',
-        left: 0,
-        right: 0,
-        background: '#fff',
-        border: '1px solid #ddd',
-        borderRadius: 10,
-        boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
-        zIndex: 9999,
-        maxHeight: 240,
-        overflowY: 'auto',
-      }}
-    >
-      {customerOptions.map((c) => (
-        <button
-          key={c.id}
-          type="button"
-          onMouseDown={(e) => { e.preventDefault(); pickCustomer(c); }}
-          style={{
-            width: '100%',
-            textAlign: 'left',
-            padding: '10px 12px',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
+      {/* Customer details (Square live search) */}
+      <div style={{ position: 'relative', marginTop: 8 }}>
+        <label style={styles.label}>Customer details</label>
+        <input
+          style={styles.input}
+          placeholder="Customer details (type to search)…"
+          value={customerQuery}
+          onChange={(e) => {
+            setCustomerQuery(e.target.value);
+            setCustomerId(null);
+            setCustomerName('');
           }}
-          onMouseOver={(e) => (e.currentTarget.style.background = '#f7f7f7')}
-          onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
-        >
-          <div style={{ fontWeight: 600 }}>{c.name || 'Unnamed'}</div>
-          <div style={{ fontSize: 12, color: '#666' }}>
-            {(c.phone || '') + ((c.phone && c.email) ? ' · ' : '') + (c.email || '')}
-          </div>
-        </button>
-      ))}
-    </div>
-  )}
-</div>
+          autoComplete="off"
+        />
 
-      {/* Top row: Title + Phone */}
+        {customerOptions.length > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 6px)',
+              left: 0,
+              right: 0,
+              background: '#fff',
+              border: '1px solid #ddd',
+              borderRadius: 10,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+              zIndex: 9999,
+              maxHeight: 240,
+              overflowY: 'auto',
+            }}
+          >
+            {customerOptions.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); pickCustomer(c); }}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: '10px 12px',
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                }}
+                onMouseOver={(e) => (e.currentTarget.style.background = '#f7f7f7')}
+                onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <div style={{ fontWeight: 600 }}>{c.name || 'Unnamed'}</div>
+                <div style={{ fontSize: 12, color: '#666' }}>
+                  {(c.phone || '') + ((c.phone && c.email) ? ' · ' : '') + (c.email || '')}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Top row: Title + Contact number */}
       <div style={styles.row}>
         <div style={styles.col}>
           <label style={styles.label}>Title</label>
@@ -167,7 +162,7 @@ function pickCustomer(c) {
           />
         </div>
         <div style={styles.col}>
-          <label style={styles.label}>Phone</label>
+          <label style={styles.label}>Contact number (required if new customer)</label>
           <input
             style={styles.input}
             value={phone}
@@ -258,8 +253,8 @@ const styles = {
   input: { padding: '10px 12px', border: '1px solid #ddd', borderRadius: 10, fontSize: 15, outline: 'none' },
   textarea: { width: '100%', padding: 12, border: '1px solid #ddd', borderRadius: 10, fontSize: 15, resize: 'vertical' },
   select: { padding: '10px 12px', border: '1px solid #ddd', borderRadius: 10, fontSize: 15, width: '100%' },
-  grid2: { display: 'grid', gridTemplateColumns: '1fr 220px', gap: 12, alignItems: 'start', marginTop: 8 }, // narrow right column
-  sidebar: { display: 'grid', gap: 10 }, // Issue type above Priority
+  grid2: { display: 'grid', gridTemplateColumns: '1fr 220px', gap: 12, alignItems: 'start', marginTop: 8 },
+  sidebar: { display: 'grid', gap: 10 },
   button: { padding: '10px 14px', borderRadius: 10, border: 'none', background: '#111827', color: '#fff', fontWeight: 600, cursor: 'pointer' },
   fileSmall: { padding: 6, border: '1px dashed #d5d5d8', borderRadius: 10, background: '#fafafa', fontSize: 13, width: '100%' },
   fileHint: { fontSize: 12, color: '#666', marginTop: 6 },

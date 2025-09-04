@@ -73,9 +73,10 @@ export default function Dashboard({ onLogout, user }) {
   const loadCases = useCallback(async () => {
     const params = { ...filters, status: statusForTab, page, pageSize };
     try {
-      const r = await api.get('/api/cases', { params });
-      setCases(r.data.items || []);
-      setTotal(r.data.total || 0);
+      // ✅ correct path (no /api)
+      const r = await api.get('/cases', { params });
+      setCases(r.data?.items || r.items || []);
+      setTotal(r.data?.total ?? r.total ?? 0);
     } catch { setCases([]); setTotal(0); }
   }, [filters, page, pageSize, statusForTab]);
 
@@ -111,24 +112,17 @@ export default function Dashboard({ onLogout, user }) {
         return;
       }
 
-      // --- FIX: Backend requires a title. Derive one safely without changing UI. ---
-      const derivedTitle = [
-        (newCase.customerName || '').trim() || 'New case',
-        (newCase.issueType || '').trim()
-      ].filter(Boolean).join(' — ');
-
       const payload = {
         ...newCase,
-        title: derivedTitle,                 // << required by backend
         agent: user?.name || '',
-        customerPhone: allPhones.join(', '), // store all numbers in one field
+        customerPhone: allPhones.join(', ')
       };
-
       const fd = new FormData();
       fd.append('data', JSON.stringify(payload));
       (caseFiles || []).forEach(f => fd.append('files', f));
 
-      await api.post('/api/cases', fd);
+      // ✅ correct path (no /api)
+      await api.post('/cases', fd);
 
       setNewCase({
         customerId: '', customerName: '', customerEmail: '', customerPhone: '',
@@ -143,7 +137,6 @@ export default function Dashboard({ onLogout, user }) {
       console.error(err);
       const msg =
         err?.response?.data?.error ||
-        err?.response?.data?.message ||
         err?.message ||
         'Failed to create case';
       alert('Create case failed: ' + msg);
@@ -154,13 +147,16 @@ export default function Dashboard({ onLogout, user }) {
     try {
       const solutionSummary = window.prompt('Add a brief solution summary before closing:');
       if (!solutionSummary) return;
-      await api.put(`/api/cases/${id}`, { status: 'Closed', solutionSummary });
+      // ✅ correct path (no /api)
+      await api.put(`/cases/${id}`, { status: 'Closed', solutionSummary });
       await loadCases();
     } catch (e) { console.error(e); alert('Failed to close case'); }
   };
+
   const reopenCase = async (id) => {
     try {
-      await api.put(`/api/cases/${id}`, { status: 'Open' });
+      // ✅ correct path (no /api)
+      await api.put(`/cases/${id}`, { status: 'Open' });
       setTab('active');
       await loadCases();
     } catch (e) { console.error(e); alert('Failed to reopen case'); }
@@ -173,8 +169,9 @@ export default function Dashboard({ onLogout, user }) {
       fd.append('agent', user?.name || '');
       fd.append('note', logNote);
       (logFiles || []).forEach(f => fd.append('files', f));
-      const r = await api.post(`/api/cases/${expandedCase._id}/logs`, fd);
-      setExpandedCase(r.data);
+      // ✅ correct path (no /api)
+      const r = await api.post(`/cases/${expandedCase._id}/logs`, fd);
+      setExpandedCase(r.data || r); // refresh inline case
       setLogNote('');
       setLogFiles([]);
       await loadCases();

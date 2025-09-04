@@ -1,3 +1,15 @@
 /* Dashboard.css — minimal, safe */
 .table .btn.ghost { padding: 8px 10px; }
 /* keep empty unless you need tiny per-component tweaks */
+
+/* Autocomplete menu */
+.autocomplete { position: relative; }
+.autocomplete .menu {
+  position: absolute; z-index: 50; top: 100%; left: 0; right: 0;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+  margin-top: 6px; box-shadow: 0 10px 30px rgba(0,0,0,.08); max-height: 260px; overflow: auto;
+}
+.autocomplete .item { padding: 10px 12px; cursor: pointer; }
+.autocomplete .item:hover { background: #f9fafb; }
+.autocomplete .title { font-weight: 600; }
+.autocomplete .sub { font-size: 12px; color: #6b7280; }

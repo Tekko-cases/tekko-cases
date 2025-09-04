@@ -100,48 +100,61 @@ export default function Dashboard({ onLogout, user }) {
   }, [cases, sort]);
 
   // Create case — agent = logged-in user; phone required if new customer
-  const createCase = async () => {
-    try {
-      if (!newCase.customerName || !newCase.issueType || !newCase.priority) {
-        alert('Please fill in Customer, Issue type, and Priority.');
-        return;
-      }
-      const allPhones = [newCase.customerPhone, ...extraPhones].map(s => String(s || '').trim()).filter(Boolean);
-      if (!newCase.customerId && allPhones.length === 0) {
-        alert('Please enter a contact number for new customers.');
-        return;
-      }
-
-      const payload = {
-        ...newCase,
-        agent: user?.name || '',
-        customerPhone: allPhones.join(', ')
-      };
-      const fd = new FormData();
-      fd.append('data', JSON.stringify(payload));
-      (caseFiles || []).forEach(f => fd.append('files', f));
-
-      // ✅ correct path (no /api)
-      await api.post('/cases', fd);
-
-      setNewCase({
-        customerId: '', customerName: '', customerEmail: '', customerPhone: '',
-        issueType: '', description: '', priority: '', status: 'Open'
-      });
-      setExtraPhones([]);
-      setCaseFiles([]);
-      setScreen('cases');
-      await loadCases();
-      alert('Case created.');
-    } catch (err) {
-      console.error(err);
-      const msg =
-        err?.response?.data?.error ||
-        err?.message ||
-        'Failed to create case';
-      alert('Create case failed: ' + msg);
+const createCase = async () => {
+  try {
+    if (!newCase.customerName || !newCase.issueType || !newCase.priority) {
+      alert('Please fill in Customer, Issue type, and Priority.');
+      return;
     }
-  };
+
+    // Require at least one phone for new customers
+    const allPhones = [newCase.customerPhone, ...extraPhones]
+      .map(s => String(s || '').trim())
+      .filter(Boolean);
+    if (!newCase.customerId && allPhones.length === 0) {
+      alert('Please enter a contact number for new customers.');
+      return;
+    }
+
+    // ✅ ADD A TITLE (backend requires it)
+    const computedTitle =
+      (newCase.description || '').trim().split('\n')[0] ||            // first line of description
+      `${newCase.issueType || 'Issue'} — ${newCase.customerName || 'Customer'}`;
+
+    const payload = {
+      ...newCase,
+      title: computedTitle,                       // <-- important
+      agent: user?.name || '',
+      customerPhone: allPhones.join(', '),        // store all numbers together
+    };
+
+    const fd = new FormData();
+    fd.append('data', JSON.stringify(payload));
+    (caseFiles || []).forEach(f => fd.append('files', f));
+
+    // Correct endpoint (no /api)
+    await api.post('/cases', fd);
+
+    // Reset & refresh
+    setNewCase({
+      customerId: '', customerName: '', customerEmail: '', customerPhone: '',
+      issueType: '', description: '', priority: '', status: 'Open'
+    });
+    setExtraPhones([]);
+    setCaseFiles([]);
+    setScreen('cases');
+    await loadCases();
+    alert('Case created.');
+  } catch (err) {
+    console.error(err);
+    const msg =
+      err?.response?.data?.error ||
+      err?.response?.data?.message ||
+      err?.message ||
+      'Failed to create case';
+    alert('Create case failed: ' + msg);
+  }
+};
 
   const closeCase = async (id) => {
     try {

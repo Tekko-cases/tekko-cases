@@ -16,11 +16,18 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-// Map old paths to new ones (so legacy calls still work)
+// Normalize paths so old '/api/*' callers hit the actual backend routes.
+// We keep '/api/customers/search' as-is because backend supports it too.
 function rewritePath(path = "") {
-  // If any code still calls '/customers/search', rewrite to our backend proxy
+  if (!path) return path;
+  // legacy customers search aliases (both exist on the backend)
   if (path === "/customers/search" || path.startsWith("/customers/search?")) {
     return path.replace("/customers/search", "/api/customers/search");
+  }
+
+  // For everything else under '/api/', drop the '/api' prefix
+  if (path.startsWith("/api/") && !path.startsWith("/api/customers/")) {
+    return path.replace(/^\/api\//, "/");
   }
   return path;
 }
@@ -31,7 +38,7 @@ function withParams(url, params) {
   Object.entries(params).forEach(([k, v]) => {
     if (v !== undefined && v !== null && v !== "") u.searchParams.set(k, v);
   });
-  return u.pathname.startsWith("http") ? u.toString() : u.href;
+  return u.toString();
 }
 
 async function request(method, path, { params, data, headers } = {}) {
@@ -50,7 +57,6 @@ async function request(method, path, { params, data, headers } = {}) {
     signal: controller.signal,
   };
 
-  // Body handling
   if (data instanceof FormData) {
     opts.body = data; // do NOT set Content-Type
   } else if (data !== undefined) {
@@ -60,7 +66,9 @@ async function request(method, path, { params, data, headers } = {}) {
 
   try {
     const res = await fetch(url, opts);
-    const json = await res.json().catch(() => ({}));
+    const text = await res.text();
+    let json;
+    try { json = text ? JSON.parse(text) : {}; } catch { json = { data: text }; }
     if (!res.ok) throw new Error(json?.error || json?.message || `${res.status}`);
     return json;
   } finally {
@@ -68,7 +76,6 @@ async function request(method, path, { params, data, headers } = {}) {
   }
 }
 
-// Axios-like surface (kept for compatibility with older calls)
 const http = {
   get: (path, config = {}) => request("GET", path, config),
   delete: (path, config = {}) => request("DELETE", path, config),
@@ -88,35 +95,14 @@ export async function loginByName({ username, password }) {
   return data;
 }
 
-// ---- Customer search (forces absolute API calls, with fallbacks) ----
 export async function searchCustomers(q) {
-  if (!q) return [];
-  const qs = encodeURIComponent(q || "");
-  const base = (API_BASE || "https://tekko-cases.onrender.com").replace(/\/+$/, "");
-
-  const urls = [
-    `${base}/api/customers/search?q=${qs}`,   // primary
-    `${base}/customers/search?q=${qs}`,       // fallback (also supported on backend)
-    // last-resort hard fallback in case env/base wasn’t picked up
-    `https://tekko-cases.onrender.com/api/customers/search?q=${qs}`,
-  ];
-
-  for (const u of urls) {
-    try {
-      const r = await fetch(u, { headers: { "Content-Type": "application/json" } });
-      if (r.ok) return await r.json();
-    } catch {
-      // try next URL
-    }
-  }
-  return [];
+  return await http.get("/api/customers/search", { params: { q } });
 }
 
 export async function listCases() {
-  return await http.get("/cases");
+  return await http.get("/cases"); // '/api/cases' callers are rewritten too
 }
 
-// ---- Create case (explicit fetch so token + FormData are guaranteed) ----
 export async function createCase(
   { title, description, customerId, customerName, issueType, priority },
   files = []
@@ -134,42 +120,16 @@ export async function createCase(
   fd.append("data", JSON.stringify(payload));
   (files || []).forEach((f) => f && fd.append("files", f));
 
-  const base = (API_BASE || "https://tekko-cases.onrender.com").replace(/\/+$/, "");
-  const token = localStorage.getItem("token") || "";
-
-  const res = await fetch(`${base}/cases`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    // do NOT set Content-Type for FormData
-    body: fd,
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || "Create case failed");
-  return data;
+  return await http.post("/cases", fd); // '/api/cases' callers are rewritten too
 }
 
-// ---- Add log (also explicit to guarantee token with FormData) ----
 export async function addLog(caseId, note, files = []) {
   const fd = new FormData();
   fd.append("note", note || "");
   (files || []).forEach((f) => f && fd.append("files", f));
-
-  const base = (API_BASE || "https://tekko-cases.onrender.com").replace(/\/+$/, "");
-  const token = localStorage.getItem("token") || "";
-
-  const res = await fetch(`${base}/cases/${caseId}/logs`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: fd,
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || "Add log failed");
-  return data;
+  return await http.post(`/cases/${caseId}/logs`, fd);
 }
 
-// Default export is the axios-like object, but also include helpers on it:
 const api = Object.assign({}, http, {
   API_BASE,
   loginByName,
@@ -179,6 +139,5 @@ const api = Object.assign({}, http, {
   addLog,
 });
 
-// Provide BOTH a default export and a named `api` so any import style works.
 export { api };
 export default api;

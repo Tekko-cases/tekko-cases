@@ -3,8 +3,7 @@ import { api, API_BASE } from './api';
 import './Dashboard.css';
 
 const ISSUE_TYPES = ['Product info', 'Plans', 'Rentals', 'Shipping', 'Product support', 'Other'];
-// CHANGED: Priority set as requested
-const PRIORITIES  = ['Low', 'Normal', 'High', 'Urgent'];
+const PRIORITIES  = ['Low', 'Medium', 'High'];
 
 export default function Dashboard({ onLogout, user }) {
   // Top nav: create | filters | cases
@@ -40,8 +39,7 @@ export default function Dashboard({ onLogout, user }) {
     customerPhone: '',
     issueType: '',
     description: '',
-    // CHANGED: default to Normal
-    priority: 'Normal',
+    priority: '',
     status: 'Open',
   });
   const [extraPhones, setExtraPhones] = useState([]); // subtle extra numbers
@@ -113,17 +111,19 @@ export default function Dashboard({ onLogout, user }) {
         return;
       }
 
-      // CHANGED: guard priority before sending
-      const allowedPriorities = new Set(PRIORITIES);
-      const safePriority = allowedPriorities.has(newCase.priority) ? newCase.priority : 'Normal';
+      // --- FIX: Backend requires a title. Derive one safely without changing UI. ---
+      const derivedTitle = [
+        (newCase.customerName || '').trim() || 'New case',
+        (newCase.issueType || '').trim()
+      ].filter(Boolean).join(' — ');
 
       const payload = {
         ...newCase,
-        priority: safePriority, // ensure safe value
+        title: derivedTitle,                 // << required by backend
         agent: user?.name || '',
-        // store all numbers in one field so backend always persists them
-        customerPhone: allPhones.join(', ')
+        customerPhone: allPhones.join(', '), // store all numbers in one field
       };
+
       const fd = new FormData();
       fd.append('data', JSON.stringify(payload));
       (caseFiles || []).forEach(f => fd.append('files', f));
@@ -132,7 +132,7 @@ export default function Dashboard({ onLogout, user }) {
 
       setNewCase({
         customerId: '', customerName: '', customerEmail: '', customerPhone: '',
-        issueType: '', description: '', priority: 'Normal', status: 'Open' // keep default on reset
+        issueType: '', description: '', priority: '', status: 'Open'
       });
       setExtraPhones([]);
       setCaseFiles([]);
@@ -141,7 +141,11 @@ export default function Dashboard({ onLogout, user }) {
       alert('Case created.');
     } catch (err) {
       console.error(err);
-      const msg = err?.response?.data?.error || err?.message || 'Failed to create case';
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to create case';
       alert('Create case failed: ' + msg);
     }
   };
@@ -170,7 +174,7 @@ export default function Dashboard({ onLogout, user }) {
       fd.append('note', logNote);
       (logFiles || []).forEach(f => fd.append('files', f));
       const r = await api.post(`/api/cases/${expandedCase._id}/logs`, fd);
-      setExpandedCase(r.data); // refresh inline case
+      setExpandedCase(r.data);
       setLogNote('');
       setLogFiles([]);
       await loadCases();
@@ -279,7 +283,7 @@ export default function Dashboard({ onLogout, user }) {
                       copy[i] = e.target.value;
                       setExtraPhones(copy);
                     }}
-                    style={{ marginTop: 6, fontSize: 12, padding: '6px 8px' }} // less conspicuous
+                    style={{ marginTop: 6, fontSize: 12, padding: '6px 8px' }}
                   />
                 ))}
               </div>

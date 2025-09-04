@@ -7,33 +7,24 @@ const ISSUE_TYPES = ['Product info', 'Plans', 'Rentals', 'Shipping', 'Product su
 const PRIORITIES  = ['Low', 'Medium', 'High'];
 
 export default function Dashboard({ onLogout, user }) {
-  // Top nav: create | filters | cases
-  const [screen, setScreen] = useState('cases'); // 'create' | 'filters' | 'cases'
-
-  // Tabs inside Cases: active | archived
+  const [screen, setScreen] = useState('cases');
   const [tab, setTab] = useState('active');
   const statusForTab = tab === 'active' ? 'Open' : 'Closed';
 
-  // Agents (for filter only)
   const [agents, setAgents] = useState([]);
 
-  // Filters
   const [filters, setFilters] = useState({ q: '', issueType: '', agent: '', priority: '' });
   const [filtersLocal, setFiltersLocal] = useState({ q: '', issueType: '', agent: '', priority: '' });
 
-  // Data & pagination
   const [cases, setCases] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
 
-  // Sorting
   const [sort, setSort] = useState({ key: 'caseNumber', dir: 'desc' });
-  const sortIndicator = (key) => (sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
-  const toggleSort = (key) =>
-    setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  const sortIndicator = (key) => sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const toggleSort = (key) => setSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
 
-  // New case
   const [newCase, setNewCase] = useState({
     customerId: '',
     customerName: '',
@@ -41,13 +32,11 @@ export default function Dashboard({ onLogout, user }) {
     customerPhone: '',
     issueType: '',
     description: '',
-    priority: '',
-    status: 'Open',
+    priority: ''
   });
-  const [extraPhones, setExtraPhones] = useState([]); // subtle extra numbers
+  const [extraPhones, setExtraPhones] = useState([]);
   const [caseFiles, setCaseFiles] = useState([]);
 
-  // Square autocomplete (stays on /api/customers/search)
   const [suggestions, setSuggestions] = useState([]);
   const fetchSuggestions = useCallback(async (query) => {
     const val = String(query || '').trim();
@@ -60,7 +49,6 @@ export default function Dashboard({ onLogout, user }) {
     }
   }, []);
 
-  // Logs inline under a case row
   const [expandedCase, setExpandedCase] = useState(null);
   const [logNote, setLogNote] = useState('');
   const [logFiles, setLogFiles] = useState([]);
@@ -69,22 +57,16 @@ export default function Dashboard({ onLogout, user }) {
     try {
       const r = await api.get('/api/agents');
       setAgents(r.data || []);
-    } catch {
-      setAgents([]);
-    }
+    } catch { setAgents([]); }
   }, []);
 
   const loadCases = useCallback(async () => {
     const params = { ...filters, status: statusForTab, page, pageSize };
     try {
-      // correct path (no /api)
-      const r = await api.get('/cases', { params });
-      setCases(r?.data?.items || r?.items || []);
-      setTotal(r?.data?.total ?? r?.total ?? 0);
-    } catch {
-      setCases([]);
-      setTotal(0);
-    }
+      const r = await api.get('/cases', { params });             // <-- no /api
+      setCases(r.data?.items || r.items || []);
+      setTotal(r.data?.total ?? r.total ?? 0);
+    } catch { setCases([]); setTotal(0); }
   }, [filters, page, pageSize, statusForTab]);
 
   useEffect(() => { loadAgents(); }, [loadAgents]);
@@ -98,8 +80,7 @@ export default function Dashboard({ onLogout, user }) {
       const av = a?.[key] ?? '';
       const bv = b?.[key] ?? '';
       if (typeof av === 'number' && typeof bv === 'number') return dir === 'asc' ? av - bv : bv - av;
-      const A = String(av).toLowerCase();
-      const B = String(bv).toLowerCase();
+      const A = String(av).toLowerCase(); const B = String(bv).toLowerCase();
       if (A < B) return dir === 'asc' ? -1 : 1;
       if (A > B) return dir === 'asc' ? 1 : -1;
       return 0;
@@ -107,7 +88,21 @@ export default function Dashboard({ onLogout, user }) {
     return items;
   }, [cases, sort]);
 
-  // Create case — agent = logged-in user; phone required if new customer
+  // ---- helper to show server error exactly ----
+  function showServerError(err, fallback = 'Request failed') {
+    try {
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        fallback;
+      alert('Create case failed: ' + msg);
+    } catch {
+      alert(fallback);
+    }
+  }
+
+  // ---- CREATE CASE (minimal allowed fields only) ----
   const createCase = async () => {
     try {
       if (!newCase.customerName || !newCase.issueType || !newCase.priority) {
@@ -115,45 +110,41 @@ export default function Dashboard({ onLogout, user }) {
         return;
       }
 
-      // Require at least one phone for new customers
+      // at least one phone for a new customer
       const allPhones = [newCase.customerPhone, ...extraPhones]
-        .map((s) => String(s || '').trim())
+        .map(s => String(s || '').trim())
         .filter(Boolean);
       if (!newCase.customerId && allPhones.length === 0) {
         alert('Please enter a contact number for new customers.');
         return;
       }
 
-      // Backend needs a title. Derive it automatically so the UI can stay clean.
-      const descFirst = (newCase.description || '').trim().split('\n').find(Boolean) || '';
+      // Build a safe title (server requires a title)
       const computedTitle =
-        descFirst ||
-        `${newCase.issueType || 'Issue'} — ${newCase.customerName || 'Customer'}` ||
-        'New case';
+        (newCase.description || '').trim().split('\n')[0] ||
+        `${newCase.issueType || 'Issue'} — ${newCase.customerName || 'Customer'}`;
 
+      // MINIMAL payload (only server-accepted keys)
       const payload = {
         title: computedTitle,
-        description: newCase.description || '',
+        description: (newCase.description || '').trim(),
         customerId: newCase.customerId || null,
         customerName: newCase.customerName || '',
         issueType: newCase.issueType || 'Other',
-        priority: newCase.priority || 'Normal',
-        agent: user?.name || '',
-        // store all numbers together
-        customerPhone: allPhones.join(', '),
+        priority: newCase.priority || 'Low',
+        customerPhone: allPhones.join(', ')
       };
 
       const fd = new FormData();
       fd.append('data', JSON.stringify(payload));
-      (caseFiles || []).forEach((f) => f && fd.append('files', f));
+      (caseFiles || []).forEach(f => f && fd.append('files', f));
 
-      // Correct endpoint (no /api)
-      await api.post('/cases', fd);
+      await api.post('/cases', fd);                                // <-- no /api
 
-      // Reset & refresh
+      // Reset
       setNewCase({
         customerId: '', customerName: '', customerEmail: '', customerPhone: '',
-        issueType: '', description: '', priority: '', status: 'Open',
+        issueType: '', description: '', priority: ''
       });
       setExtraPhones([]);
       setCaseFiles([]);
@@ -162,12 +153,7 @@ export default function Dashboard({ onLogout, user }) {
       alert('Case created.');
     } catch (err) {
       console.error(err);
-      const msg =
-        err?.response?.data?.error ||
-        err?.response?.data?.message ||
-        err?.message ||
-        'Failed to create case';
-      alert('Create case failed: ' + msg);
+      showServerError(err, 'Create case failed');
     }
   };
 
@@ -177,10 +163,7 @@ export default function Dashboard({ onLogout, user }) {
       if (!solutionSummary) return;
       await api.put(`/cases/${id}`, { status: 'Closed', solutionSummary });
       await loadCases();
-    } catch (e) {
-      console.error(e);
-      alert('Failed to close case');
-    }
+    } catch (e) { console.error(e); alert('Failed to close case'); }
   };
 
   const reopenCase = async (id) => {
@@ -188,82 +171,53 @@ export default function Dashboard({ onLogout, user }) {
       await api.put(`/cases/${id}`, { status: 'Open' });
       setTab('active');
       await loadCases();
-    } catch (e) {
-      console.error(e);
-      alert('Failed to reopen case');
-    }
+    } catch (e) { console.error(e); alert('Failed to reopen case'); }
   };
 
   const addLog = async () => {
     try {
       if (!expandedCase) return;
       const fd = new FormData();
-      fd.append('agent', user?.name || '');
       fd.append('note', logNote);
-      (logFiles || []).forEach((f) => f && fd.append('files', f));
+      (logFiles || []).forEach(f => f && fd.append('files', f));
       const r = await api.post(`/cases/${expandedCase._id}/logs`, fd);
-      setExpandedCase(r?.data || r); // refresh inline case
+      setExpandedCase(r.data || r);
       setLogNote('');
       setLogFiles([]);
       await loadCases();
     } catch (err) {
       console.error(err);
-      const msg = err?.response?.data?.error || err?.message || 'Failed to add log';
-      alert('Add log failed: ' + msg);
+      alert('Add log failed');
     }
   };
 
-  function applyFilters(e) {
-    if (e) e.preventDefault();
-    setFilters(filtersLocal);
-    setPage(1);
-    setScreen('cases');
-  }
-  function resetFilters() {
-    const empty = { q: '', issueType: '', agent: '', priority: '' };
-    setFiltersLocal(empty);
-    setFilters(empty);
-    setPage(1);
-  }
-
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  function applyFilters(e) { if (e) e.preventDefault(); setFilters(filtersLocal); setPage(1); setScreen('cases'); }
+  function resetFilters()   { const empty = { q: '', issueType: '', agent: '', priority: '' }; setFiltersLocal(empty); setFilters(empty); setPage(1); }
 
   const Nav = () => (
-    <nav style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-      <button className={`btn ${screen === 'create' ? 'primary' : ''}`} onClick={() => setScreen('create')}>
-        Create case
-      </button>
-      <button className={`btn ${screen === 'filters' ? 'primary' : ''}`} onClick={() => setScreen('filters')}>
-        Filters & Search
-      </button>
-      <button className={`btn ${screen === 'cases' ? 'primary' : ''}`} onClick={() => setScreen('cases')}>
-        Cases
-      </button>
-      <div style={{ flex: 1 }} />
+    <nav style={{ display:'flex', gap:8, alignItems:'center' }}>
+      <button className={`btn ${screen==='create' ? 'primary' : ''}`} onClick={() => setScreen('create')}>Create case</button>
+      <button className={`btn ${screen==='filters' ? 'primary' : ''}`} onClick={() => setScreen('filters')}>Filters & Search</button>
+      <button className={`btn ${screen==='cases' ? 'primary' : ''}`} onClick={() => setScreen('cases')}>Cases</button>
+      <div style={{ flex:1 }} />
       {user && <span className="muted">Signed in as {user.name}</span>}
-      {typeof onLogout === 'function' && (
-        <button className="btn" onClick={onLogout}>
-          Log out
-        </button>
-      )}
+      {typeof onLogout === 'function' && <button className="btn" onClick={onLogout}>Log out</button>}
     </nav>
   );
 
+  // ----- UI (unchanged) -----
   return (
     <div className="page">
-      {/* HEADER */}
       <header className="appbar">
         <div className="brand">Tekko cases</div>
         <Nav />
       </header>
 
-      {/* CREATE */}
       {screen === 'create' && (
         <section className="col" style={{ maxWidth: 900, margin: '12px auto' }}>
           <div className="card">
             <div className="card-title">Create New Case</div>
             <div className="grid2">
-              {/* Customer (Square autocomplete) */}
               <div className="autocomplete">
                 <input
                   placeholder="Customer"
@@ -273,9 +227,7 @@ export default function Dashboard({ onLogout, user }) {
                     setNewCase({
                       ...newCase,
                       customerName: val,
-                      customerId: '',
-                      customerEmail: '',
-                      customerPhone: '',
+                      customerId: '', customerEmail: '', customerPhone: '',
                     });
                     fetchSuggestions(val);
                   }}
@@ -283,7 +235,7 @@ export default function Dashboard({ onLogout, user }) {
                 />
                 {suggestions.length > 0 && (
                   <div className="menu">
-                    {suggestions.map((s) => (
+                    {suggestions.map(s => (
                       <div
                         key={s.id}
                         className="item"
@@ -293,7 +245,7 @@ export default function Dashboard({ onLogout, user }) {
                             customerId: s.id,
                             customerName: s.name || '',
                             customerEmail: s.email || '',
-                            customerPhone: s.phone || '',
+                            customerPhone: s.phone || ''
                           });
                           setSuggestions([]);
                         }}
@@ -306,29 +258,27 @@ export default function Dashboard({ onLogout, user }) {
                 )}
               </div>
 
-              {/* Primary number (required if new customer) */}
               <input
                 placeholder="Contact number (required if new customer)"
                 value={newCase.customerPhone}
                 onChange={(e) => setNewCase({ ...newCase, customerPhone: e.target.value })}
               />
 
-              {/* Subtle extra numbers */}
               <div style={{ gridColumn: '1 / -1' }}>
                 <button
                   type="button"
                   className="btn"
                   style={{ padding: 0, fontSize: 12, background: 'transparent', textDecoration: 'underline' }}
-                  onClick={() => setExtraPhones((p) => [...p, ''])}
+                  onClick={() => setExtraPhones(p => [...p, ''])}
                 >
                   + Add another number
                 </button>
                 {extraPhones.map((ph, i) => (
                   <input
                     key={i}
-                    placeholder={`Extra number ${i + 1}`}
+                    placeholder={`Extra number ${i+1}`}
                     value={ph}
-                    onChange={(e) => {
+                    onChange={e => {
                       const copy = [...extraPhones];
                       copy[i] = e.target.value;
                       setExtraPhones(copy);
@@ -341,117 +291,79 @@ export default function Dashboard({ onLogout, user }) {
               <textarea
                 placeholder="Description"
                 value={newCase.description}
-                onChange={(e) => setNewCase({ ...newCase, description: e.target.value })}
+                onChange={e => setNewCase({ ...newCase, description: e.target.value })}
               />
 
-              <select value={newCase.issueType} onChange={(e) => setNewCase({ ...newCase, issueType: e.target.value })}>
+              <select value={newCase.issueType} onChange={e => setNewCase({ ...newCase, issueType: e.target.value })}>
                 <option value="">Issue type</option>
-                {ISSUE_TYPES.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
+                {ISSUE_TYPES.map(x => <option key={x} value={x}>{x}</option>)}
               </select>
 
-              <select value={newCase.priority} onChange={(e) => setNewCase({ ...newCase, priority: e.target.value })}>
+              <select value={newCase.priority} onChange={e => setNewCase({ ...newCase, priority: e.target.value })}>
                 <option value="">Priority</option>
-                {PRIORITIES.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
+                {PRIORITIES.map(x => <option key={x} value={x}>{x}</option>)}
               </select>
 
-              <input type="file" multiple onChange={(e) => setCaseFiles(Array.from(e.target.files || []))} />
+              <input type="file" multiple onChange={e => setCaseFiles(Array.from(e.target.files || []))} />
             </div>
 
             {(newCase.customerEmail || newCase.customerPhone || extraPhones.length > 0) && (
               <div className="muted" style={{ marginTop: 8 }}>
-                <b>Customer details:</b> {newCase.customerEmail || '—'} ·{' '}
-                {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '—'}
+                <b>Customer details:</b> {newCase.customerEmail || '—'} · {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '—'}
               </div>
             )}
 
             <div className="actions-row">
-              <button className="btn primary" onClick={createCase}>
-                Create Case
-              </button>
+              <button className="btn primary" onClick={createCase}>Create Case</button>
             </div>
           </div>
         </section>
       )}
 
-      {/* FILTERS */}
       {screen === 'filters' && (
         <section className="col" style={{ maxWidth: 700, margin: '12px auto' }}>
           <div className="card">
             <div className="card-title">Filters & Search</div>
-            <form onSubmit={applyFilters}>
-              <input
-                placeholder="Search (customer, description, logs…)"
-                value={filtersLocal.q}
-                onChange={(e) => setFiltersLocal({ ...filtersLocal, q: e.target.value })}
-              />
+            <form onSubmit={(e)=>{e.preventDefault(); setFilters(filtersLocal); setPage(1); setScreen('cases');}}>
+              <input placeholder="Search (customer, description, logs…)"
+                     value={filtersLocal.q}
+                     onChange={e => setFiltersLocal({ ...filtersLocal, q: e.target.value })} />
 
-              <select
-                value={filtersLocal.issueType}
-                onChange={(e) => setFiltersLocal({ ...filtersLocal, issueType: e.target.value })}
-              >
+              <select value={filtersLocal.issueType}
+                      onChange={e => setFiltersLocal({ ...filtersLocal, issueType: e.target.value })}>
                 <option value="">Issue type (all)</option>
-                {ISSUE_TYPES.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
+                {ISSUE_TYPES.map(x => <option key={x} value={x}>{x}</option>)}
               </select>
 
-              <select
-                value={filtersLocal.agent}
-                onChange={(e) => setFiltersLocal({ ...filtersLocal, agent: e.target.value })}
-              >
+              <select value={filtersLocal.agent}
+                      onChange={e => setFiltersLocal({ ...filtersLocal, agent: e.target.value })}>
                 <option value="">Agent (all)</option>
-                {agents.map((a) => (
-                  <option key={a._id || a.name} value={a.name}>
-                    {a.name}
-                  </option>
-                ))}
+                {agents.map(a => <option key={a._id || a.name} value={a.name}>{a.name}</option>)}
               </select>
 
-              <select
-                value={filtersLocal.priority}
-                onChange={(e) => setFiltersLocal({ ...filtersLocal, priority: e.target.value })}
-              >
+              <select value={filtersLocal.priority}
+                      onChange={e => setFiltersLocal({ ...filtersLocal, priority: e.target.value })}>
                 <option value="">Priority (all)</option>
-                {PRIORITIES.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
+                {PRIORITIES.map(x => <option key={x} value={x}>{x}</option>)}
               </select>
 
               <div className="actions-row">
-                <button type="button" className="btn" onClick={resetFilters}>
-                  Reset
-                </button>
-                <button className="btn primary" type="submit">
-                  Apply
-                </button>
+                <button type="button" className="btn" onClick={()=>{
+                  const empty = { q: '', issueType: '', agent: '', priority: '' };
+                  setFiltersLocal(empty); setFilters(empty); setPage(1);
+                }}>Reset</button>
+                <button className="btn primary" type="submit">Apply</button>
               </div>
             </form>
           </div>
         </section>
       )}
 
-      {/* CASES */}
       {screen === 'cases' && (
         <>
           <div className="tabs" style={{ maxWidth: 1100, margin: '8px auto' }}>
-            <button className={`tab ${tab === 'active' ? 'active' : ''}`} onClick={() => setTab('active')}>
-              Open
-            </button>
-            <button className={`tab ${tab === 'archived' ? 'active' : ''}`} onClick={() => setTab('archived')}>
-              Archived
-            </button>
+            <button className={`tab ${tab==='active' ? 'active' : ''}`} onClick={() => setTab('active')}>Open</button>
+            <button className={`tab ${tab==='archived' ? 'active' : ''}`} onClick={() => setTab('archived')}>Archived</button>
           </div>
 
           <section className="col" style={{ maxWidth: 1100, margin: '0 auto' }}>
@@ -461,36 +373,20 @@ export default function Dashboard({ onLogout, user }) {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th className="th-sort" onClick={() => toggleSort('caseNumber')}>
-                        # {sortIndicator('caseNumber')}
-                      </th>
-                      <th className="th-sort" onClick={() => toggleSort('customerName')}>
-                        Customer {sortIndicator('customerName')}
-                      </th>
-                      <th className="th-sort" onClick={() => toggleSort('issueType')}>
-                        Issue {sortIndicator('issueType')}
-                      </th>
-                      <th className="th-sort" onClick={() => toggleSort('priority')}>
-                        Priority {sortIndicator('priority')}
-                      </th>
-                      <th className="th-sort" onClick={() => toggleSort('agent')}>
-                        Agent {sortIndicator('agent')}
-                      </th>
-                      <th className="th-sort" onClick={() => toggleSort('status')}>
-                        Status {sortIndicator('status')}
-                      </th>
+                      <th className="th-sort" onClick={() => toggleSort('caseNumber')}># {sortIndicator('caseNumber')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('customerName')}>Customer {sortIndicator('customerName')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('issueType')}>Issue {sortIndicator('issueType')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('priority')}>Priority {sortIndicator('priority')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('agent')}>Agent {sortIndicator('agent')}</th>
+                      <th className="th-sort" onClick={() => toggleSort('status')}>Status {sortIndicator('status')}</th>
                       <th style={{ width: 220 }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedCases.length === 0 && (
-                      <tr>
-                        <td colSpan={7} style={{ padding: 16, color: '#6b7280' }}>
-                          No cases.
-                        </td>
-                      </tr>
+                      <tr><td colSpan={7} style={{ padding: 16, color: '#6b7280' }}>No cases.</td></tr>
                     )}
-                    {sortedCases.map((c) => {
+                    {sortedCases.map(c => {
                       const expanded = expandedCase && expandedCase._id === c._id;
                       return (
                         <React.Fragment key={c._id}>
@@ -503,32 +399,21 @@ export default function Dashboard({ onLogout, user }) {
                               </div>
                             </td>
                             <td>{c.issueType}</td>
-                            <td>
-                              <span className={`chip ${String(c.priority).toLowerCase()}`}>{c.priority}</span>
-                            </td>
+                            <td><span className={`chip ${String(c.priority).toLowerCase()}`}>{c.priority}</span></td>
                             <td>{c.agent}</td>
-                            <td>
-                              <span className={`chip ${c.status === 'Open' ? 'open' : 'closed'}`}>{c.status}</span>
-                            </td>
+                            <td><span className={`chip ${c.status === 'Open' ? 'open' : 'closed'}`}>{c.status}</span></td>
                             <td>
                               <div className="actions-inline">
                                 <button className="btn ghost" onClick={() => setExpandedCase(expanded ? null : c)}>
                                   {expanded ? 'Hide' : 'View'}
                                 </button>
-                                {c.status !== 'Closed' ? (
-                                  <button className="btn ghost" onClick={() => closeCase(c._id)}>
-                                    Close
-                                  </button>
-                                ) : (
-                                  <button className="btn ghost" onClick={() => reopenCase(c._id)}>
-                                    Reopen
-                                  </button>
-                                )}
+                                {c.status !== 'Closed'
+                                  ? <button className="btn ghost" onClick={() => closeCase(c._id)}>Close</button>
+                                  : <button className="btn ghost" onClick={() => reopenCase(c._id)}>Reopen</button>}
                               </div>
                             </td>
                           </tr>
 
-                          {/* Inline logs row */}
                           {expanded && (
                             <tr>
                               <td colSpan={7} style={{ background: '#fafafa' }}>
@@ -540,43 +425,28 @@ export default function Dashboard({ onLogout, user }) {
                                   </div>
 
                                   <div className="grid2">
-                                    <input
-                                      type="file"
-                                      multiple
-                                      onChange={(e) => setLogFiles(Array.from(e.target.files || []))}
-                                    />
-                                    <textarea
-                                      placeholder="Note…"
-                                      value={logNote}
-                                      onChange={(e) => setLogNote(e.target.value)}
-                                    />
+                                    <input type="file" multiple onChange={e => setLogFiles(Array.from(e.target.files || []))} />
+                                    <textarea placeholder="Note…" value={logNote} onChange={e => setLogNote(e.target.value)} />
                                   </div>
                                   <div className="actions-row">
-                                    <button className="btn primary" onClick={addLog}>
-                                      Add log
-                                    </button>
+                                    <button className="btn primary" onClick={addLog}>Add log</button>
                                   </div>
 
                                   <ul className="loglist">
-                                    {(expandedCase.logs || [])
-                                      .slice()
-                                      .reverse()
-                                      .map((log, i) => (
-                                        <li key={i}>
-                                          <b>{log.author}</b>
-                                          <span className="muted"> — {new Date(log.at).toLocaleString()}</span>
-                                          <div>{log.message}</div>
-                                          {Array.isArray(log.files) && log.files.length > 0 && (
-                                            <div className="thumbs">
-                                              {log.files.map((u, j) => (
-                                                <a key={j} href={`${API_BASE}${u}`} target="_blank" rel="noreferrer">
-                                                  Attachment {j + 1}
-                                                </a>
-                                              ))}
-                                            </div>
-                                          )}
-                                        </li>
-                                      ))}
+                                    {(expandedCase.logs || []).slice().reverse().map((log, i) => (
+                                      <li key={i}>
+                                        <b>{log.author}</b>
+                                        <span className="muted"> — {new Date(log.at).toLocaleString()}</span>
+                                        <div>{log.message}</div>
+                                        {Array.isArray(log.files) && log.files.length > 0 && (
+                                          <div className="thumbs">
+                                            {log.files.map((u, j) => (
+                                              <a key={j} href={`${API_BASE}${u}`} target="_blank" rel="noreferrer">Attachment {j + 1}</a>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </li>
+                                    ))}
                                   </ul>
                                 </div>
                               </td>
@@ -589,19 +459,11 @@ export default function Dashboard({ onLogout, user }) {
                 </table>
               </div>
 
-              {/* Pagination */}
               <div className="pagination">
-                <button className="btn" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                  Prev
-                </button>
+                <button className="btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
                 <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
-                <button
-                  className="btn"
-                  disabled={page >= Math.max(1, Math.ceil(total / pageSize))}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </button>
+                <button className="btn" disabled={page >= Math.max(1, Math.ceil(total / pageSize))}
+                        onClick={() => setPage(p => p + 1)}>Next</button>
               </div>
             </div>
           </section>

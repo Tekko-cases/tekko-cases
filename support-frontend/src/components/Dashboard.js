@@ -55,7 +55,7 @@ export default function Dashboard({ onLogout, user }) {
 
   const loadAgents = useCallback(async () => {
     try {
-      const r = await api.get('/api/agents');
+       const r = await api.get('/api/agents'); // backend route
       setAgents(r.data || []);
     } catch { setAgents([]); }
   }, []);
@@ -104,67 +104,68 @@ export default function Dashboard({ onLogout, user }) {
 
   // ---- CREATE CASE (minimal allowed fields only) ----
   const createCase = async () => {
-    try {
-      if (!newCase.customerName || !newCase.issueType || !newCase.priority) {
-        alert('Please fill in Customer, Issue type, and Priority.');
-        return;
-      }
-
-      // at least one phone for a new customer
-      const allPhones = [newCase.customerPhone, ...extraPhones]
-        .map(s => String(s || '').trim())
-        .filter(Boolean);
-      if (!newCase.customerId && allPhones.length === 0) {
-        alert('Please enter a contact number for new customers.');
-        return;
-      }
-
-      // Build a safe title (server requires a title)
-      const computedTitle =
-        (newCase.description || '').trim().split('\n')[0] ||
-        `${newCase.issueType || 'Issue'} — ${newCase.customerName || 'Customer'}`;
-
-      // MINIMAL payload (only server-accepted keys)
-      const payload = {
-        title: computedTitle,
-        description: (newCase.description || '').trim(),
-        customerId: newCase.customerId || null,
-        customerName: newCase.customerName || '',
-        issueType: newCase.issueType || 'Other',
-        priority: newCase.priority || 'Low',
-        customerPhone: allPhones.join(', ')
-      };
-
-      const fd = new FormData();
-      fd.append('data', JSON.stringify(payload));
-      (caseFiles || []).forEach(f => f && fd.append('files', f));
-
-      await api.post('/cases', fd);                                // <-- no /api
-
-      // Reset
-      setNewCase({
-        customerId: '', customerName: '', customerEmail: '', customerPhone: '',
-        issueType: '', description: '', priority: ''
-      });
-      setExtraPhones([]);
-      setCaseFiles([]);
-      setScreen('cases');
-      await loadCases();
-      alert('Case created.');
-    } catch (err) {
-      console.error(err);
-      showServerError(err, 'Create case failed');
+  try {
+    if (!newCase.customerName || !newCase.issueType) {
+      alert('Please fill in Customer and Issue type.');
+      return;
     }
-  };
 
-  const closeCase = async (id) => {
-    try {
-      const solutionSummary = window.prompt('Add a brief solution summary before closing:');
-      if (!solutionSummary) return;
-      await api.put(`/cases/${id}`, { status: 'Closed', solutionSummary });
-      await loadCases();
-    } catch (e) { console.error(e); alert('Failed to close case'); }
-  };
+    // collect numbers
+    const allPhones = [newCase.customerPhone, ...extraPhones]
+      .map(s => String(s || '').trim())
+      .filter(Boolean);
+    if (!newCase.customerId && allPhones.length === 0) {
+      alert('Please enter a contact number for new customers.');
+      return;
+    }
+
+    // compute a sensible title if user didn’t type one
+    const computedTitle =
+      (newCase.description || '').trim().split('\n')[0] ||
+      `${newCase.issueType || 'Issue'} — ${newCase.customerName || 'Customer'}`;
+
+    const payload = {
+      ...newCase,
+      title: computedTitle,
+      agent: user?.name || '',
+      // ✅ default priority if user didn’t pick one
+      priority: newCase.priority || 'Low',
+      // store all numbers as a single string (backend accepts this)
+      customerPhone: allPhones.join(', ')
+    };
+
+    const fd = new FormData();
+    fd.append('data', JSON.stringify(payload));
+    (caseFiles || []).forEach(f => fd.append('files', f));
+
+    await api.post('/cases', fd); // correct endpoint
+
+    // reset
+    setNewCase({
+      customerId: '',
+      customerName: '',
+      customerEmail: '',
+      customerPhone: '',
+      issueType: '',
+      description: '',
+      priority: '',
+      status: 'Open'
+    });
+    setExtraPhones([]);
+    setCaseFiles([]);
+    setScreen('cases');
+    await loadCases();
+    alert('Case created.');
+  } catch (err) {
+    console.error(err);
+    const msg =
+      err?.response?.data?.error ||
+      err?.response?.data?.message ||
+      err?.message ||
+      'Failed to create case';
+    alert('Create case failed: ' + msg);
+  }
+};
 
   const reopenCase = async (id) => {
     try {

@@ -1,6 +1,6 @@
 // src/components/Cases.jsx
 import React, { useEffect, useState } from 'react';
-import { tekkoListCases, tekkoCloseCase, tekkoReopenCase, tekkoDeleteCase } from '../api';
+import { tekkoListCases, tekkoCloseCase, tekkoReopenCase, tekkoDeleteCase } from '../tekko-api';
 
 export default function Cases() {
   const [view, setView] = useState('open');

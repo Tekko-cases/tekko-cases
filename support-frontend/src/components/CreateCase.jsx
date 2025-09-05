@@ -1,6 +1,6 @@
 // src/components/CreateCase.jsx
 import React, { useState } from 'react';
-import { tekkoCreateCase } from '../api';
+import { tekkoCreateCase } from '../tekko-api';
 
 const ISSUE_TYPES = ['Plans','Billing','Technical','Activation','Shipping','Rentals','Other'];
 const PRIORITIES = ['Low','Normal','High','Urgent'];

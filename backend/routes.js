@@ -1,4 +1,3 @@
-// backend/routes.js (full replacement; aligns list API with frontend expectations)
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
@@ -13,7 +12,7 @@ const Counter = require('./models/Counter');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 const SEED_SECRET = process.env.SEED_SECRET || 'dev-seed';
-const ISSUE_TYPES = ['Plans', 'Billing', 'Technical', 'Activation', 'Shipping', 'Other'];
+const ISSUE_TYPES = ['Plans', 'Billing', 'Technical', 'Activation', 'Shipping', 'Rentals', 'Other'];
 const PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'];
 
 // ---------- Health ----------
@@ -21,7 +20,7 @@ router.get(['/health', '/healthz'], (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
-// ---------- Auth middleware ----------
+// ---------- Auth ----------
 function auth(req, res, next) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
@@ -35,7 +34,7 @@ function auth(req, res, next) {
 }
 const esc = (s='') => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// ---------- Login (email + passwordHash) ----------
+// ---------- Login (email) ----------
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
@@ -61,7 +60,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ---------- Login by NAME (auto-create allowed agents) ----------
+// ---------- Login by name (auto-create) ----------
 router.post('/login-name', async (req, res) => {
   try {
     const { username, name, password } = req.body || {};
@@ -111,7 +110,7 @@ router.post('/login-name', async (req, res) => {
   }
 });
 
-// ---------- Optional: seed agents ----------
+// ---------- Seed agents (optional) ----------
 async function seedAgents(req, res) {
   try {
     if ((req.query.secret || '') !== SEED_SECRET) return res.status(403).json({ error: 'Forbidden' });
@@ -137,7 +136,7 @@ async function seedAgents(req, res) {
 router.get('/admin/seed-agents', seedAgents);
 router.get('/api/admin/seed-agents', seedAgents);
 
-// ---------- File uploads ----------
+// ---------- Uploads ----------
 const uploadsRoot = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadsRoot)) fs.mkdirSync(uploadsRoot, { recursive: true });
 const storage = multer.diskStorage({
@@ -150,6 +149,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+// ---------- Case number ----------
 async function nextCaseNumber() {
   const doc = await Counter.findOneAndUpdate(
     { _id: 'caseNumber' },
@@ -159,7 +159,7 @@ async function nextCaseNumber() {
   return doc.seq;
 }
 
-// ---------- Cases ----------
+// ---------- Cases: list ----------
 router.get('/cases', auth, async (req, res) => {
   try {
     const view = String(req.query.view || 'open').toLowerCase();
@@ -180,8 +180,10 @@ router.get('/cases', auth, async (req, res) => {
   }
 });
 
+// ---------- Cases: create ----------
 router.post('/cases', auth, upload.array('files', 12), async (req, res) => {
   try {
+    // Allow both multipart {data} and raw JSON
     const raw = (req.body && req.body.data) ? req.body.data : JSON.stringify(req.body || {});
     const data = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
 
@@ -218,6 +220,7 @@ router.post('/cases', auth, upload.array('files', 12), async (req, res) => {
   }
 });
 
+// ---------- Cases: add log ----------
 router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) => {
   try {
     const { id } = req.params;
@@ -238,7 +241,38 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
   }
 });
 
-// ---------- Square customers search ----------
+// ---------- Cases: close, reopen, delete ----------
+router.patch('/cases/:id/close', auth, async (req, res) => {
+  try {
+    const doc = await Case.findByIdAndUpdate(req.params.id, { status: 'Closed', archived: true }, { new: true });
+    if (!doc) return res.status(404).json({ error: 'Case not found' });
+    res.json({ ok: true, case: doc });
+  } catch (e) {
+    res.status(400).json({ error: 'Close failed' });
+  }
+});
+
+router.patch('/cases/:id/reopen', auth, async (req, res) => {
+  try {
+    const doc = await Case.findByIdAndUpdate(req.params.id, { status: 'Open', archived: false }, { new: true });
+    if (!doc) return res.status(404).json({ error: 'Case not found' });
+    res.json({ ok: true, case: doc });
+  } catch (e) {
+    res.status(400).json({ error: 'Reopen failed' });
+  }
+});
+
+router.delete('/cases/:id', auth, async (req, res) => {
+  try {
+    const r = await Case.deleteOne({ _id: req.params.id });
+    if (!r.deletedCount) return res.status(404).json({ error: 'Case not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: 'Delete failed' });
+  }
+});
+
+// ---------- Square search (unchanged except hardening) ----------
 async function squareSearch(req, res) {
   try {
     const qOrig = String(req.query.q || '').trim();
@@ -256,18 +290,12 @@ async function squareSearch(req, res) {
       'Authorization': `Bearer ${token}`,
     };
 
-    const qLower = qOrig.toLowerCase();
     const looksLikeEmail = qOrig.includes('@');
     const hasDigits = /\d/.test(qOrig);
-
     const results = new Map();
 
-    async function searchEmailPhone(body) {
-      const r = await fetch(`${base}/v2/customers/search`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
+    async function postSearch(body) {
+      const r = await fetch(`${base}/v2/customers/search`, { method: 'POST', headers, body: JSON.stringify(body) });
       const json = await r.json();
       if (!r.ok) throw new Error(JSON.stringify(json));
       for (const c of (json.customers || [])) results.set(c.id, c);
@@ -283,21 +311,13 @@ async function squareSearch(req, res) {
         const r = await fetch(url.toString(), { headers });
         const json = await r.json();
         if (!r.ok) throw new Error(JSON.stringify(json));
-
         for (const c of (json.customers || [])) {
           const fullName = [c.given_name, c.family_name].filter(Boolean).join(' ').toLowerCase();
           const company  = (c.company_name || '').toLowerCase();
           const nick     = (c.nickname || '').toLowerCase();
-
-          if (
-            fullName.includes(qLower) ||
-            company.includes(qLower) ||
-            nick.includes(qLower)
-          ) {
-            results.set(c.id, c);
-          }
+          const qLower = qOrig.toLowerCase();
+          if (fullName.includes(qLower) || company.includes(qLower) || nick.includes(qLower)) results.set(c.id, c);
         }
-
         if (!json.cursor || results.size >= 20) break;
         cursor = json.cursor;
       }
@@ -305,13 +325,13 @@ async function squareSearch(req, res) {
 
     try {
       if (looksLikeEmail) {
-        await searchEmailPhone({ query: { filter: { email_address: { fuzzy: qOrig } } }, limit: 20 });
+        await postSearch({ query: { filter: { email_address: { fuzzy: qOrig } } }, limit: 20 });
       } else if (hasDigits) {
-        await searchEmailPhone({ query: { filter: { phone_number: { fuzzy: qOrig } } }, limit: 20 });
+        await postSearch({ query: { filter: { phone_number: { fuzzy: qOrig } } }, limit: 20 });
       } else {
         await listAndFilterNames();
       }
-    } catch (e) {
+    } catch {
       if (!looksLikeEmail && !hasDigits) throw e;
       await listAndFilterNames();
     }
@@ -332,7 +352,7 @@ async function squareSearch(req, res) {
 router.get('/api/customers/search', squareSearch);
 router.get('/customers/search', squareSearch);
 
-// One-time fixer
+// ---------- Counter fixer ----------
 router.get('/admin/fix-case-counter', async (_req, res) => {
   try {
     const maxDoc = await Case.findOne().sort({ caseNumber: -1 }).select('caseNumber').lean();

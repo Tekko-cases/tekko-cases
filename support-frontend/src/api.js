@@ -168,3 +168,39 @@ const api = Object.assign({}, http, {
 // Provide BOTH a default export and a named `api` so any import style works.
 export { api };
 export default api;
+
+// --- Tekko Cases API (append below your existing code) ---
+const TEKKO_API = process.env.REACT_APP_API_URL;
+
+function authHeaders() {
+  const t = localStorage.getItem('token') || '';
+  return { Authorization: `Bearer ${t}` };
+}
+
+export async function tekkoListCases(view = 'open') {
+  const r = await fetch(`${TEKKO_API}/cases?view=${view}`, { headers: authHeaders() });
+  const j = await r.json().catch(() => ({}));
+  return j.items || [];
+}
+
+export async function tekkoCreateCase(payload, files = []) {
+  const fd = new FormData();
+  fd.append('data', JSON.stringify(payload));
+  for (const f of files) fd.append('files', f);
+  const r = await fetch(`${TEKKO_API}/cases`, { method: 'POST', headers: authHeaders(), body: fd });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j.error || 'Create failed');
+  }
+  return r.json();
+}
+
+export async function tekkoCloseCase(id) {
+  await fetch(`${TEKKO_API}/cases/${id}/close`, { method: 'PATCH', headers: authHeaders() });
+}
+export async function tekkoReopenCase(id) {
+  await fetch(`${TEKKO_API}/cases/${id}/reopen`, { method: 'PATCH', headers: authHeaders() });
+}
+export async function tekkoDeleteCase(id) {
+  await fetch(`${TEKKO_API}/cases/${id}`, { method: 'DELETE', headers: authHeaders() });
+}

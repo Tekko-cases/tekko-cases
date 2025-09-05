@@ -1,41 +1,22 @@
 const mongoose = require('mongoose');
 
-const logSchema = new mongoose.Schema(
+const CaseSchema = new mongoose.Schema(
   {
-    author: String,               // agent name
-    message: String,              // the note
-    files: [String],              // /uploads/... paths
-    at: { type: Date, default: Date.now },
-  },
-  { _id: false }
-);
-
-const caseSchema = new mongoose.Schema(
-  {
-    // identity
-    caseNumber: { type: Number, unique: true, index: true },
-
-    // customer (from Square)
-    customerId: String,           // Square customer ID (optional but useful)
+    caseNumber: { type: Number, required: true, index: true, unique: true },
     customerName: { type: String, required: true },
-    customerEmail: String,
-    customerPhone: String,
+    phoneNumbers: [{ type: String }],
+    email: { type: String },
+    issue: { type: String, default: '' },
+    priority: { type: String, enum: ['Low', 'Medium', 'High'], default: 'Medium' },
+    department: { type: String, default: 'General' },
 
-    // case fields
-    issueType: String,            // e.g. Product info / Plans / Rentals / ...
-    description: String,
-    priority: { type: String, default: 'Low' }, // Low / Medium / High
-    agent: String,                // agent name
-    status: { type: String, default: 'Open' },  // Open / Closed
-    solutionSummary: String,
+    // IMPORTANT DEFAULTS
+    status: { type: String, enum: ['Open', 'Closed'], default: 'Open', index: true },
+    archived: { type: Boolean, default: false, index: true },
 
-    // files uploaded when creating a case
-    attachments: [String],
-
-    // activity
-    logs: [logSchema],
+    agent: { type: String, default: '' },
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model('Case', caseSchema);
+module.exports = mongoose.model('Case', CaseSchema);

@@ -1,4 +1,4 @@
-// backend/routes.js (full replacement with agent auto-create; minimal, focused changes)
+// backend/routes.js (full replacement; aligns list API with frontend expectations)
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
@@ -73,27 +73,24 @@ router.post('/login-name', async (req, res) => {
     const allowed = (process.env.AGENT_NAMES || 'Sheindy,Chayelle,Yenti,Tzivi,Roisy,Toby,Blimi')
       .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
-// First try derived seed email (toby@agents.local, etc.)
-const emailAuto = `${identLower}@agents.local`;
-let user = await User.findOne({ email: emailAuto, active: true });
+    const emailAuto = `${identLower}@agents.local`;
+    let user = await User.findOne({ email: emailAuto, active: true });
 
-// If not found by email, fall back to name (case-insensitive)
-if (!user) {
-  user =
-    (await User.findOne({ active: true, name: { $regex: `^${esc(identRaw)}$`, $options: 'i' } })) ||
-    (await User.findOne({ active: true, name: { $regex: esc(identRaw), $options: 'i' } }));
-}
+    if (!user) {
+      user =
+        (await User.findOne({ active: true, name: { $regex: `^${esc(identRaw)}$`, $options: 'i' } })) ||
+        (await User.findOne({ active: true, name: { $regex: esc(identRaw), $options: 'i' } }));
+    }
 
-// Auto-create if still missing and allowed
-if (!user && allowed.includes(identLower)) {
-  user = await User.create({
-    name: identRaw,
-    email: emailAuto,
-    role: 'agent',
-    active: true,
-    passwordHash: await bcrypt.hash(passIn, 10),
-  });
-}
+    if (!user && allowed.includes(identLower)) {
+      user = await User.create({
+        name: identRaw,
+        email: emailAuto,
+        role: 'agent',
+        active: true,
+        passwordHash: await bcrypt.hash(passIn, 10),
+      });
+    }
 
     if (!(user && user.passwordHash) || user.active === false) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -114,7 +111,7 @@ if (!user && allowed.includes(identLower)) {
   }
 });
 
-// ---------- Optional: seed agents (GET; supports /api/... too) ----------
+// ---------- Optional: seed agents ----------
 async function seedAgents(req, res) {
   try {
     if ((req.query.secret || '') !== SEED_SECRET) return res.status(403).json({ error: 'Forbidden' });
@@ -165,8 +162,18 @@ async function nextCaseNumber() {
 // ---------- Cases ----------
 router.get('/cases', auth, async (req, res) => {
   try {
-    const items = await Case.find({}).sort({ createdAt: -1 }).limit(200);
-    res.json(items);
+    const view = String(req.query.view || 'open').toLowerCase();
+    const filter = view === 'archived' ? { archived: true } : { archived: { $ne: true } };
+
+    const page = Math.max(parseInt(req.query.page || '1', 10), 1);
+    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize || '20', 10), 1), 100);
+
+    const [items, total] = await Promise.all([
+      Case.find(filter).sort({ createdAt: -1, caseNumber: -1 }).skip((page - 1) * pageSize).limit(pageSize).lean(),
+      Case.countDocuments(filter),
+    ]);
+
+    res.json({ ok: true, items, total, page, pageSize });
   } catch (e) {
     console.error('List cases error:', e);
     res.status(500).json({ error: 'Failed to list cases' });
@@ -198,6 +205,7 @@ router.post('/cases', auth, upload.array('files', 12), async (req, res) => {
       issueType: safeIssue,
       priority: safePriority,
       status: 'Open',
+      archived: false,
       agent: data.agent || (req.user && req.user.name) || 'Unassigned',
       attachments,
       logs: [],
@@ -230,7 +238,7 @@ router.post('/cases/:id/logs', auth, upload.array('files', 8), async (req, res) 
   }
 });
 
-// ---------- Square customers search (robust: email/phone via search; names via list+filter) ----------
+// ---------- Square customers search ----------
 async function squareSearch(req, res) {
   try {
     const qOrig = String(req.query.q || '').trim();
@@ -248,14 +256,12 @@ async function squareSearch(req, res) {
       'Authorization': `Bearer ${token}`,
     };
 
-    const q = qOrig;
     const qLower = qOrig.toLowerCase();
-    const looksLikeEmail = q.includes('@');
-    const hasDigits = /\d/.test(q);
+    const looksLikeEmail = qOrig.includes('@');
+    const hasDigits = /\d/.test(qOrig);
 
     const results = new Map();
 
-    // Helper: POST /v2/customers/search (for email/phone which we know work)
     async function searchEmailPhone(body) {
       const r = await fetch(`${base}/v2/customers/search`, {
         method: 'POST',
@@ -267,7 +273,6 @@ async function squareSearch(req, res) {
       for (const c of (json.customers || [])) results.set(c.id, c);
     }
 
-    // Helper: GET /v2/customers (paginate a few pages) and filter names locally
     async function listAndFilterNames(maxPages = Number(process.env.SQUARE_NAME_PAGES || 3)) {
       let cursor = null;
       for (let page = 0; page < maxPages; page++) {
@@ -293,23 +298,20 @@ async function squareSearch(req, res) {
           }
         }
 
-        if (!json.cursor || results.size >= 20) break; // stop early if enough
+        if (!json.cursor || results.size >= 20) break;
         cursor = json.cursor;
       }
     }
 
-    // 1) Email / phone with Square's search (these already worked for you)
     try {
       if (looksLikeEmail) {
-        await searchEmailPhone({ query: { filter: { email_address: { fuzzy: q } } }, limit: 20 });
+        await searchEmailPhone({ query: { filter: { email_address: { fuzzy: qOrig } } }, limit: 20 });
       } else if (hasDigits) {
-        await searchEmailPhone({ query: { filter: { phone_number: { fuzzy: q } } }, limit: 20 });
+        await searchEmailPhone({ query: { filter: { phone_number: { fuzzy: qOrig } } }, limit: 20 });
       } else {
-        // 2) Name/company/nickname via list+filter (no reliance on unsupported name filters)
         await listAndFilterNames();
       }
     } catch (e) {
-      // If email/phone search fails for some reason, fall back to list+filter as a safety net
       if (!looksLikeEmail && !hasDigits) throw e;
       await listAndFilterNames();
     }
@@ -330,7 +332,7 @@ async function squareSearch(req, res) {
 router.get('/api/customers/search', squareSearch);
 router.get('/customers/search', squareSearch);
 
-// One-time fixer: aligns the counter with the highest existing case number
+// One-time fixer
 router.get('/admin/fix-case-counter', async (_req, res) => {
   try {
     const maxDoc = await Case.findOne().sort({ caseNumber: -1 }).select('caseNumber').lean();

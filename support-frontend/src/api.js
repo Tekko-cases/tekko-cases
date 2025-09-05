@@ -169,16 +169,19 @@ const api = Object.assign({}, http, {
 export { api };
 export default api;
 
-// --- Tekko Cases API (append below your existing code) ---
+// --- Tekko Cases API (safe: no duplicate names) ---
 const TEKKO_API = process.env.REACT_APP_API_URL;
 
-function authHeaders() {
-  const t = localStorage.getItem('token') || '';
-  return { Authorization: `Bearer ${t}` };
-}
+// Reuse existing authHeaders if present; otherwise define a local one.
+const tekkoAuth = (typeof authHeaders === 'function')
+  ? authHeaders
+  : () => {
+      const t = localStorage.getItem('token') || '';
+      return { Authorization: `Bearer ${t}` };
+    };
 
 export async function tekkoListCases(view = 'open') {
-  const r = await fetch(`${TEKKO_API}/cases?view=${view}`, { headers: authHeaders() });
+  const r = await fetch(`${TEKKO_API}/cases?view=${view}`, { headers: tekkoAuth() });
   const j = await r.json().catch(() => ({}));
   return j.items || [];
 }
@@ -187,12 +190,22 @@ export async function tekkoCreateCase(payload, files = []) {
   const fd = new FormData();
   fd.append('data', JSON.stringify(payload));
   for (const f of files) fd.append('files', f);
-  const r = await fetch(`${TEKKO_API}/cases`, { method: 'POST', headers: authHeaders(), body: fd });
+  const r = await fetch(`${TEKKO_API}/cases`, { method: 'POST', headers: tekkoAuth(), body: fd });
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
     throw new Error(j.error || 'Create failed');
   }
   return r.json();
+}
+
+export async function tekkoCloseCase(id) {
+  await fetch(`${TEKKO_API}/cases/${id}/close`, { method: 'PATCH', headers: tekkoAuth() });
+}
+export async function tekkoReopenCase(id) {
+  await fetch(`${TEKKO_API}/cases/${id}/reopen`, { method: 'PATCH', headers: tekkoAuth() });
+}
+export async function tekkoDeleteCase(id) {
+  await fetch(`${TEKKO_API}/cases/${id}`, { method: 'DELETE', headers: tekkoAuth() });
 }
 
 export async function tekkoCloseCase(id) {

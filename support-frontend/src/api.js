@@ -16,6 +16,9 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// Expose for other modules (optional; harmless in CRA)
+try { if (typeof window !== "undefined") window.authHeaders = authHeaders; } catch {}
+
 // Map old paths to new ones (so legacy calls still work)
 function rewritePath(path = "") {
   // If any code still calls '/customers/search', rewrite to our backend proxy
@@ -112,8 +115,9 @@ export async function searchCustomers(q) {
   return [];
 }
 
-export async function listCases() {
-  return await http.get("/cases");
+// Backwards-compatible: listCases() still works, now supports view
+export async function listCases(view = "open") {
+  return await http.get("/cases", { params: { view } });
 }
 
 export async function createCase(
@@ -168,23 +172,3 @@ const api = Object.assign({}, http, {
 // Provide BOTH a default export and a named `api` so any import style works.
 export { api };
 export default api;
-
-
-  await fetch(`${TEKKO_API}/cases/${id}/close`, { method: 'PATCH', headers: tekkoAuth() });
-}
-export async function tekkoReopenCase(id) {
-  await fetch(`${TEKKO_API}/cases/${id}/reopen`, { method: 'PATCH', headers: tekkoAuth() });
-}
-export async function tekkoDeleteCase(id) {
-  await fetch(`${TEKKO_API}/cases/${id}`, { method: 'DELETE', headers: tekkoAuth() });
-}
-
-export async function tekkoCloseCase(id) {
-  await fetch(`${TEKKO_API}/cases/${id}/close`, { method: 'PATCH', headers: authHeaders() });
-}
-export async function tekkoReopenCase(id) {
-  await fetch(`${TEKKO_API}/cases/${id}/reopen`, { method: 'PATCH', headers: authHeaders() });
-}
-export async function tekkoDeleteCase(id) {
-  await fetch(`${TEKKO_API}/cases/${id}`, { method: 'DELETE', headers: authHeaders() });
-}

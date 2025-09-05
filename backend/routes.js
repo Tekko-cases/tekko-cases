@@ -155,7 +155,9 @@ const upload = multer({ storage });
 
 async function nextCaseNumber() {
   const doc = await Counter.findOneAndUpdate(
-    { key: 'case' }, { $inc: { seq: 1 } }, { upsert: true, new: true }
+    { _id: 'caseNumber' },
+    { $inc: { seq: 1 } },
+    { new: true, upsert: true }
   );
   return doc.seq;
 }
@@ -327,5 +329,23 @@ async function squareSearch(req, res) {
 }
 router.get('/api/customers/search', squareSearch);
 router.get('/customers/search', squareSearch);
+
+// One-time fixer: aligns the counter with the highest existing case number
+router.get('/admin/fix-case-counter', async (_req, res) => {
+  try {
+    const maxDoc = await Case.findOne().sort({ caseNumber: -1 }).select('caseNumber').lean();
+    const currentMax = (maxDoc && maxDoc.caseNumber) || 0;
+
+    const fixed = await Counter.findOneAndUpdate(
+      { _id: 'caseNumber' },
+      { $max: { seq: currentMax } },
+      { new: true, upsert: true }
+    );
+
+    res.json({ ok: true, highestExisting: currentMax, counterNow: fixed.seq });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String((e && e.message) || e) });
+  }
+});
 
 module.exports = router;

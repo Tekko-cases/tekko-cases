@@ -1,7 +1,5 @@
 // src/tekko-api.js
 const TEKKO_API = process.env.REACT_APP_API_URL;
-
-// Reuse existing authHeaders from src/api.js if it exists; otherwise fallback.
 const tekkoAuth =
   (typeof authHeaders === 'function')
     ? authHeaders
@@ -25,7 +23,7 @@ export async function tekkoCreateCase(payload, files = []) {
 
   const r = await fetch(`${TEKKO_API}/cases`, {
     method: 'POST',
-    headers: tekkoAuth(), // do NOT set Content-Type for FormData
+    headers: tekkoAuth(), // no Content-Type for FormData
     body: fd,
   });
 
@@ -35,22 +33,11 @@ export async function tekkoCreateCase(payload, files = []) {
 }
 
 export async function tekkoCloseCase(id) {
-  await fetch(`${TEKKO_API}/cases/${id}/close`, {
-    method: 'PATCH',
-    headers: tekkoAuth(),
-  });
+  await fetch(`${TEKKO_API}/cases/${id}/close`, { method: 'PATCH', headers: tekkoAuth() });
 }
-
 export async function tekkoReopenCase(id) {
-  await fetch(`${TEKKO_API}/cases/${id}/reopen`, {
-    method: 'PATCH',
-    headers: tekkoAuth(),
-  });
+  await fetch(`${TEKKO_API}/cases/${id}/reopen`, { method: 'PATCH', headers: tekkoAuth() });
 }
-
 export async function tekkoDeleteCase(id) {
-  await fetch(`${TEKKO_API}/cases/${id}`, {
-    method: 'DELETE',
-    headers: tekkoAuth(),
-  });
+  await fetch(`${TEKKO_API}/cases/${id}`, { method: 'DELETE', headers: tekkoAuth() });
 }

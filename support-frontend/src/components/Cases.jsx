@@ -29,8 +29,8 @@ export default function Cases() {
     <div className="container">
       <div className="toolbar">
         <div className="tabs">
-          <a className={`tab ${view==='open'?'tab--active':''}`} href="/cases?view=open">Open</a>
-          <a className={`tab ${view==='archived'?'tab--active':''}`} href="/cases?view=archived">Archived</a>
+          <a className={\`tab \${view==='open'?'tab--active':''}\`} href="/cases?view=open">Open</a>
+          <a className={\`tab \${view==='archived'?'tab--active':''}\`} href="/cases?view=archived">Archived</a>
         </div>
         <a className="btn btn--primary" href="/create">Create case</a>
       </div>

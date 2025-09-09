@@ -13,7 +13,8 @@ export async function tekkoListCases(view = 'open') {
     headers: tekkoAuth(),
   });
   const j = await r.json().catch(() => ({}));
-  return j.items || [];
+  // Handle both shapes: array OR {items: [...]}
+  return Array.isArray(j) ? j : (j.items || []);
 }
 
 export async function tekkoCreateCase(payload, files = []) {

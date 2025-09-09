@@ -1,4 +1,4 @@
-// src/App.js  (full replacement)
+// src/App.js
 import React, { useEffect, useState } from 'react';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
@@ -8,7 +8,7 @@ import CreateCase from './components/CreateCase';
 export default function App() {
   const [user, setUser] = useState(null);
 
-  // load saved user (same as you had)
+  // Load saved user on first render
   useEffect(() => {
     try {
       const u = JSON.parse(localStorage.getItem('user') || 'null');
@@ -16,19 +16,20 @@ export default function App() {
     } catch {}
   }, []);
 
-  // not logged in → show your existing Login screen
+  // Not logged in → show login
   if (!user) return <Login onLoggedIn={setUser} />;
 
-  // logged in → show Dashboard shell, and inside it either CreateCase or Cases
+  // Logged in → show Dashboard shell; inside it either CreateCase or Cases
   return (
     <Dashboard
       onLogout={() => { localStorage.clear(); setUser(null); }}
       user={user}
     >
-      {window.location.pathname.startsWith('/create')
-        ? <CreateCase />
-        : <Cases />
-      }
+      {window.location.pathname.startsWith('/create') ? (
+        <CreateCase />
+      ) : (
+        <Cases />
+      )}
     </Dashboard>
   );
 }

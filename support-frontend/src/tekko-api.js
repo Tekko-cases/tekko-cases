@@ -13,7 +13,7 @@ export async function tekkoListCases(view = 'open') {
     headers: tekkoAuth(),
   });
   const j = await r.json().catch(() => ({}));
-  // Handle both shapes: array OR {items: [...]}
+  // accept either an array or { items: [...] }
   return Array.isArray(j) ? j : (j.items || []);
 }
 

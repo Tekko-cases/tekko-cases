@@ -1,14 +1,2 @@
-/* Small style adjustments for buttons, tabs, and labels */
-.btn.primary { background: #2563eb; color: #fff; }
-.btn.ghost { background: transparent; border: 1px solid #ccc; }
-.tab.active { font-weight: bold; border-bottom: 2px solid #2563eb; }
-label { font-weight: 600; margin-bottom: 4px; display: block; }
-
-/* small additions so labels/buttons look right */
-.field { display: flex; flex-direction: column; gap: 6px; }
-.field > label { font-size: 12px; color: #374151; }
-.btn.primary { background: #2563eb; color: #fff; }
-.btn.ghost { background: #eef2f7; }
-.tab.active { background: #2563eb; color: #fff; }
-.chip.open { background:#d1fae5; color:#065f46; padding:2px 8px; border-radius:999px; }
-.chip.closed { background:#fee2e2; color:#7f1d1d; padding:2px 8px; border-radius:999px; }
+/* src/components/Dashboard.css (patched) */
+body { background: #fafafa; }

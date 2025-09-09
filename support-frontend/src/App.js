@@ -1,3 +1,4 @@
+// src/App.js
 import React, { useEffect, useState } from 'react';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
@@ -16,11 +17,8 @@ export default function App() {
 
   return (
     <Dashboard
+      onLogout={() => { localStorage.clear(); setUser(null); }}
       user={user}
-      onLogout={() => {
-        localStorage.clear();
-        setUser(null);
-      }}
     />
   );
 }

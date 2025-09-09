@@ -1,4 +1,4 @@
-// support-frontend/src/components/Dashboard.js
+/ support-frontend/src/components/Dashboard.js
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { api, API_BASE } from './api';
 import './Dashboard.css';
@@ -42,7 +42,6 @@ export default function Dashboard({ onLogout, user }) {
     const val = String(query || '').trim();
     if (val.length < 2) { setSuggestions([]); return; }
     try {
-      // Square proxy (always /api/customers/search)
       const r = await api.get('/api/customers/search', { params: { q: val } });
       setSuggestions(Array.isArray(r) ? r : (r?.data || []));
     } catch {
@@ -55,14 +54,11 @@ export default function Dashboard({ onLogout, user }) {
   const [logFiles, setLogFiles] = useState([]);
 
   const loadAgents = useCallback(async () => {
-    try {
-      const r = await api.get('/api/agents');
-      setAgents(r.data || []);
-    } catch { setAgents([]); }
+    try { const r = await api.get('/api/agents'); setAgents(r.data || []); }
+    catch { setAgents([]); }
   }, []);
 
   const loadCases = useCallback(async () => {
-    // Use backend view filter (open|archived). Keep other filters/paging intact.
     const params = { view: viewForTab, page, pageSize };
     try {
       const r = await api.get('/cases', { params });
@@ -71,9 +67,7 @@ export default function Dashboard({ onLogout, user }) {
       const tot = (data.total != null) ? data.total : items.length;
       setCases(items);
       setTotal(tot);
-    } catch {
-      setCases([]); setTotal(0);
-    }
+    } catch { setCases([]); setTotal(0); }
   }, [page, pageSize, viewForTab]);
 
   useEffect(() => { loadAgents(); }, [loadAgents]);
@@ -82,7 +76,7 @@ export default function Dashboard({ onLogout, user }) {
 
   // ---- CLIENT-SIDE FILTERS (also searches logs) ----
   const filteredCases = useMemo(() => {
-    const q = (filters.q || '').toLowerCase().trim();
+    const q  = (filters.q || '').toLowerCase().trim();
     const ft = (filters.issueType || '').toLowerCase();
     const fa = (filters.agent || '').toLowerCase();
     const fp = (filters.priority || '').toLowerCase();
@@ -92,13 +86,16 @@ export default function Dashboard({ onLogout, user }) {
       if (fa && String(c.agent || '').toLowerCase() !== fa) return false;
       if (fp && String(c.priority || '').toLowerCase() !== fp) return false;
       if (!q) return true;
-      const inLogs = Array.isArray(c.logs) && c.logs.some(l => String(l.note || '').toLowerCase().includes(q));
+
+      const inLogs = Array.isArray(c.logs) &&
+        c.logs.some(l => String(l.note || '').toLowerCase().includes(q));
+
       return (
         String(c.customerName || '').toLowerCase().includes(q) ||
-        String(c.description || '').toLowerCase().includes(q) ||
-        String(c.issueType || '').toLowerCase().includes(q) ||
-        String(c.priority || '').toLowerCase().includes(q) ||
-        String(c.agent || '').toLowerCase().includes(q) ||
+        String(c.description  || '').toLowerCase().includes(q) ||
+        String(c.issueType    || '').toLowerCase().includes(q) ||
+        String(c.priority     || '').toLowerCase().includes(q) ||
+        String(c.agent        || '').toLowerCase().includes(q) ||
         inLogs
       );
     };
@@ -106,7 +103,7 @@ export default function Dashboard({ onLogout, user }) {
     return cases.filter(matches);
   }, [cases, filters]);
 
-  // ---- SORTED + PAGED ----
+  // ---- SORT + PAGE ----
   const sortedCases = useMemo(() => {
     const items = [...filteredCases];
     const { key, dir } = sort;
@@ -141,7 +138,7 @@ export default function Dashboard({ onLogout, user }) {
         return;
       }
       const computedTitle =
-        (newCase.description || '').trim().split('\\n')[0] ||
+        (newCase.description || '').trim().split('\n')[0] ||
         `${newCase.issueType || 'Issue'} — ${newCase.customerName || 'Customer'}`;
 
       const payload = {
@@ -163,10 +160,10 @@ export default function Dashboard({ onLogout, user }) {
       try {
         if (created && created._id) {
           const note =
-            `Case created\\n` +
-            `Issue: ${payload.issueType || '-'}\\n` +
-            `Priority: ${payload.priority || '-'}\\n` +
-            (payload.description ? `\\n${payload.description}` : '');
+            `Case created\n` +
+            `Issue: ${payload.issueType || '-'}\n` +
+            `Priority: ${payload.priority || '-'}\n` +
+            (payload.description ? `\n${payload.description}` : '');
           const fdLog = new FormData();
           fdLog.append('note', note);
           await api.post(`/cases/${created._id}/logs`, fdLog);
@@ -192,6 +189,24 @@ export default function Dashboard({ onLogout, user }) {
       console.error(err);
       const msg = err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Failed to create case';
       alert('Create case failed: ' + msg);
+    }
+  };
+
+  // ---- ADD LOG (this was missing and caused the blank page on “View”) ----
+  const addLog = async () => {
+    try {
+      if (!expandedCase) return;
+      const fd = new FormData();
+      fd.append('note', logNote);
+      (logFiles || []).forEach(f => f && fd.append('files', f));
+      const r = await api.post(`/cases/${expandedCase._id}/logs`, fd);
+      setExpandedCase(r.data || r);
+      setLogNote('');
+      setLogFiles([]);
+      await loadCases();
+    } catch (e) {
+      console.error(e);
+      alert('Add log failed');
     }
   };
 
@@ -241,7 +256,7 @@ export default function Dashboard({ onLogout, user }) {
       </header>
 
       {screen === 'create' && (
-        <section className="col col-narrow" >
+        <section className="col col-narrow">
           <div className="card">
             <div className="card-title">Create New Case</div>
 
@@ -294,11 +309,7 @@ export default function Dashboard({ onLogout, user }) {
               />
 
               <div style={{ gridColumn: '1 / -1' }}>
-                <button
-                  type="button"
-                  className="btn link"
-                  onClick={() => setExtraPhones(p => [...p, ''])}
-                >
+                <button type="button" className="btn link" onClick={() => setExtraPhones(p => [...p, ''])}>
                   + Add another number
                 </button>
                 {extraPhones.map((ph, i) => (
@@ -481,19 +492,16 @@ export default function Dashboard({ onLogout, user }) {
                                         {Array.isArray(log.files) && log.files.length > 0 && (
                                           <div className="thumbs">
                                             {log.files.map((f, j) => {
-                                              let href = "";
+                                              let href = '';
                                               let label = `Attachment ${j + 1}`;
-
-                                              if (typeof f === "string") {
-                                                href = f.startsWith("http") ? f : `${API_BASE}${f}`;
+                                              if (typeof f === 'string') {
+                                                href = f.startsWith('http') ? f : `${API_BASE}${f}`;
                                               } else {
-                                                const p = f?.path || f?.url || "";
-                                                href = p.startsWith("http") ? p : `${API_BASE}${p}`;
+                                                const p = f?.path || f?.url || '';
+                                                href = p.startsWith('http') ? p : `${API_BASE}${p}`;
                                                 if (f?.filename) label = f.filename;
                                               }
-
                                               if (!href) return null;
-
                                               return (
                                                 <a key={j} href={href} target="_blank" rel="noreferrer">
                                                   📎 {label}

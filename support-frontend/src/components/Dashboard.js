@@ -141,7 +141,7 @@ export default function Dashboard({ onLogout, user }) {
         return;
       }
       const computedTitle =
-        (newCase.description || '').trim().split('\n')[0] ||
+        (newCase.description || '').trim().split('\\n')[0] ||
         `${newCase.issueType || 'Issue'} — ${newCase.customerName || 'Customer'}`;
 
       const payload = {
@@ -163,10 +163,10 @@ export default function Dashboard({ onLogout, user }) {
       try {
         if (created && created._id) {
           const note =
-            `Case created\n` +
-            `Issue: ${payload.issueType || '-'}\n` +
-            `Priority: ${payload.priority || '-'}\n` +
-            (payload.description ? `\n${payload.description}` : '');
+            `Case created\\n` +
+            `Issue: ${payload.issueType || '-'}\\n` +
+            `Priority: ${payload.priority || '-'}\\n` +
+            (payload.description ? `\\n${payload.description}` : '');
           const fdLog = new FormData();
           fdLog.append('note', note);
           await api.post(`/cases/${created._id}/logs`, fdLog);
@@ -480,11 +480,26 @@ export default function Dashboard({ onLogout, user }) {
                                         {log.note && <div className="lognote">{log.note}</div>}
                                         {Array.isArray(log.files) && log.files.length > 0 && (
                                           <div className="thumbs">
-                                            {log.files.map((f, j) => (
-                                              <a key={j} href={f.path?.startsWith('http') ? f.path : `${API_BASE}${f.path}`} target="_blank" rel="noreferrer">
-                                                📎 {f.filename || `Attachment ${j+1}`}
-                                              </a>
-                                            ))}
+                                            {log.files.map((f, j) => {
+                                              let href = "";
+                                              let label = `Attachment ${j + 1}`;
+
+                                              if (typeof f === "string") {
+                                                href = f.startsWith("http") ? f : `${API_BASE}${f}`;
+                                              } else {
+                                                const p = f?.path || f?.url || "";
+                                                href = p.startsWith("http") ? p : `${API_BASE}${p}`;
+                                                if (f?.filename) label = f.filename;
+                                              }
+
+                                              if (!href) return null;
+
+                                              return (
+                                                <a key={j} href={href} target="_blank" rel="noreferrer">
+                                                  📎 {label}
+                                                </a>
+                                              );
+                                            })}
                                           </div>
                                         )}
                                       </li>

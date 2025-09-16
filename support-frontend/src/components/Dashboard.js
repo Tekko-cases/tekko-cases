@@ -281,22 +281,26 @@ export default function Dashboard({ onLogout, user }) {
                   <div className="menu">
                     {suggestions.map(s => (
                       <div
-                        key={s.id}
-                        className="item"
-                        onMouseDown={() => {
-                          setNewCase({
-                            ...newCase,
-                            customerId: s.id,
-                            customerName: s.name || '',
-                            customerEmail: s.email || '',
-                            customerPhone: s.phone || ''
-                          });
-                          setSuggestions([]);
-                        }}
-                      >
-                        <div className="title">{s.name}</div>
-                        <div className="sub">{s.email || '—'} · {s.phone || '—'}</div>
-                      </div>
+  key={s.id}
+  className="item"
+  onMouseDown={() => {
+    const email = s.email || s.email_address || '';
+    const phone = s.phone || s.phone_number || '';
+    setNewCase({
+      ...newCase,
+      customerId: s.id,
+      customerName: s.name || '',
+      customerEmail: email,
+      customerPhone: phone
+    });
+    setSuggestions([]);
+  }}
+>
+  <div className="title">{s.name}</div>
+  <div className="sub">
+    {(s.email || s.email_address || '—')} · {(s.phone || s.phone_number || '—')}
+  </div>
+</div>
                     ))}
                   </div>
                 )}
@@ -356,11 +360,11 @@ export default function Dashboard({ onLogout, user }) {
 
             <input type="file" multiple onChange={e => setCaseFiles(Array.from(e.target.files || []))} />
 
-            {(newCase.customerEmail || newCase.customerPhone || extraPhones.length > 0) && (
-              <div className="muted details-line">
-                <b>Customer details:</b> {newCase.customerEmail || '—'} · {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '—'}
-              </div>
-            )}
+            <div className="muted details-line">
+  <b>Customer details:</b>{' '}
+  {(newCase.customerEmail || '').trim() || '—'} ·{' '}
+  {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '—'}
+</div>
 
             <div className="actions-row">
               <button className="btn primary" onClick={createCase}>Create Case</button>

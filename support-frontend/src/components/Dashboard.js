@@ -277,28 +277,37 @@ export default function Dashboard({ onLogout, user }) {
                   }}
                   onBlur={() => setTimeout(() => setSuggestions([]), 200)}
                 />
-                {suggestions.length > 0 && (
-                  <div className="menu">
-                    {suggestions.map(s => (
-                      <div
+                <div
   key={s.id}
   className="item"
   onMouseDown={() => {
-    const email = s.email || s.email_address || '';
-    const phone = s.phone || s.phone_number || '';
-    setNewCase({
-      ...newCase,
+    // Normalize Square field shapes (works for multiple API variants)
+    const email =
+      s.email ||
+      s.email_address ||
+      (s.profile && s.profile.email_address) ||
+      '';
+    const phone =
+      s.phone ||
+      s.phone_number ||
+      (s.profile && s.profile.phone_number) ||
+      '';
+
+    setNewCase(prev => ({
+      ...prev,
       customerId: s.id,
       customerName: s.name || '',
-      customerEmail: email,
-      customerPhone: phone
-    });
+      customerEmail: String(email || '').trim(),
+      customerPhone: String(phone || '').trim(),
+    }));
     setSuggestions([]);
   }}
 >
   <div className="title">{s.name}</div>
   <div className="sub">
-    {(s.email || s.email_address || '—')} · {(s.phone || s.phone_number || '—')}
+    {(s.email || s.email_address || (s.profile && s.profile.email_address) || '—')}
+    {' · '}
+    {(s.phone || s.phone_number || (s.profile && s.profile.phone_number) || '—')}
   </div>
 </div>
                     ))}

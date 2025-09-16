@@ -371,8 +371,12 @@ export default function Dashboard({ onLogout, user }) {
 
             <div className="muted details-line">
   <b>Customer details:</b>{' '}
-  {(newCase.customerEmail || '').trim() || '—'} ·{' '}
-  {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '—'}
+  {(newCase.customerEmail || '').trim() || '—'}
+  {' · '}
+  {[newCase.customerPhone, ...extraPhones]
+    .map(v => (v || '').trim())
+    .filter(Boolean)
+    .join(', ') || '—'}
 </div>
 
             <div className="actions-row">

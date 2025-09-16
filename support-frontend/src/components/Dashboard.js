@@ -367,24 +367,24 @@ export default function Dashboard({ onLogout, user }) {
               </div>
             </div>
 
-            <input type="file" multiple onChange={e => setCaseFiles(Array.from(e.target.files || []))} />
+            <input
+              type="file"
+              multiple
+              onChange={e => setCaseFiles(Array.from(e.target.files || []))}
+            />
 
             <div className="muted details-line">
-  <b>Customer details:</b>{' '}
-  {(newCase.customerEmail || '').trim() || '—'}
-  {' · '}
-  {[newCase.customerPhone, ...extraPhones]
-    .map(v => (v || '').trim())
-    .filter(Boolean)
-    .join(', ') || '—'}
-</div>
+              <b>Customer details:</b>{' '}
+              {(newCase.customerEmail || '').trim() || '—'} ·{' '}
+              {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '—'}
+            </div>
 
             <div className="actions-row">
-            <button className="btn primary" onClick={createCase}>Create Case</button>
-          </div>
-        </div> {/* end .card */}
-      </section>
-    )}
+              <button className="btn primary" onClick={createCase}>Create Case</button>
+            </div>
+          </div> {/* end .card */}
+        </section>
+      )}
 
       {screen === 'filters' && (
         <section className="col col-narrow">

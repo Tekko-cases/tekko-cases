@@ -6,6 +6,59 @@ import './Dashboard.css';
 const ISSUE_TYPES = ['Product info', 'Plans', 'Rentals', 'Shipping', 'Product support', 'Other'];
 const PRIORITIES  = ['Low', 'Medium', 'High'];
 
+/* ---------- NORMALIZERS (only new code) ---------- */
+function getFirstEmail(s) {
+  const c = s || {};
+  const candidates = [
+    c.email,
+    c.email_address,
+    c.primary_email_address,
+    c.profile?.email,
+    c.profile?.email_address,
+    c.contact?.email,
+    Array.isArray(c.emails) ? c.emails[0] : null,               // ["a@b.com", ...]
+    Array.isArray(c.emailAddresses) ? c.emailAddresses[0]?.value : null, // [{value:""}]
+  ].filter(Boolean);
+  const v = String(candidates[0] || '').trim();
+  return v || '';
+}
+
+function getFirstPhone(s) {
+  const c = s || {};
+
+  // collect from common places
+  const fromScalar = [
+    c.phone,
+    c.phone_number,
+    c.primary_phone,
+    c.primary_phone_number,
+    c.profile?.phone,
+    c.profile?.phone_number,
+    c.contact?.phone,
+    c.contact?.phone_number,
+  ].filter(Boolean);
+
+  if (fromScalar.length) {
+    return String(fromScalar[0]).trim();
+  }
+
+  // arrays with different shapes
+  const arrays = [
+    ...(Array.isArray(c.phones) ? c.phones : []),               // could be ["..."] or [{phone_number:""}]
+    ...(Array.isArray(c.phoneNumbers) ? c.phoneNumbers : []),   // [{value:""}] or [{number:""}]
+    ...(Array.isArray(c.phone_numbers) ? c.phone_numbers : []), // some APIs use snake_case array too
+  ];
+
+  for (const p of arrays) {
+    if (!p) continue;
+    const cand = p.phone_number || p.number || p.value || (typeof p === 'string' ? p : '');
+    if (cand) return String(cand).trim();
+  }
+
+  return '';
+}
+/* ------------------------------------------------- */
+
 export default function Dashboard({ onLogout, user }) {
   const [screen, setScreen] = useState('cases');
   const [tab, setTab] = useState('active'); // active=open, archived=closed
@@ -42,7 +95,6 @@ export default function Dashboard({ onLogout, user }) {
     const val = String(query || '').trim();
     if (val.length < 2) { setSuggestions([]); return; }
     try {
-      // Square proxy (always /api/customers/search)
       const r = await api.get('/api/customers/search', { params: { q: val } });
       setSuggestions(Array.isArray(r) ? r : (r?.data || []));
     } catch {
@@ -62,7 +114,6 @@ export default function Dashboard({ onLogout, user }) {
   }, []);
 
   const loadCases = useCallback(async () => {
-    // Use backend view filter (open|archived). Keep other filters/paging intact.
     const params = { view: viewForTab, page, pageSize };
     try {
       const r = await api.get('/cases', { params });
@@ -159,7 +210,6 @@ export default function Dashboard({ onLogout, user }) {
       const res = await api.post('/cases', fd);
       const created = res?.data ?? res;
 
-      // ➕ Auto log: capture what was entered
       try {
         if (created && created._id) {
           const note =
@@ -269,19 +319,9 @@ export default function Dashboard({ onLogout, user }) {
                         key={s.id}
                         className="item"
                         onMouseDown={() => {
-                          // ✅ Normalize Square field shapes for email/phone
-                          const email =
-                            s.email ??
-                            s.email_address ??
-                            s.profile?.email_address ??
-                            '';
-
-                          const phone =
-                            s.phone ??
-                            s.phone_number ??
-                            s.profile?.phone_number ??
-                            (Array.isArray(s.phones) ? (s.phones[0]?.phone_number || '') : '') ??
-                            '';
+                          // ✅ Use robust normalizers for Square payloads
+                          const email = getFirstEmail(s);
+                          const phone = getFirstPhone(s);
 
                           setNewCase(nc => ({
                             ...nc,
@@ -294,7 +334,9 @@ export default function Dashboard({ onLogout, user }) {
                         }}
                       >
                         <div className="title">{s.name}</div>
-                        <div className="sub">{(s.email || s.email_address || s.profile?.email_address || '—')} · {(s.phone || s.phone_number || s.profile?.phone_number || (Array.isArray(s.phones) ? (s.phones[0]?.phone_number || '') : '') || '—')}</div>
+                        <div className="sub">
+                          {getFirstEmail(s) || '—'} · {getFirstPhone(s) || '—'}
+                        </div>
                       </div>
                     ))}
                   </div>

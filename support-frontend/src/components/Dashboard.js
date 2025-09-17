@@ -403,7 +403,9 @@ export default function Dashboard({ onLogout, user }) {
               <select value={filtersLocal.agent}
                       onChange={e => setFiltersLocal({ ...filtersLocal, agent: e.target.value })}>
                 <option value="">Agent (all)</option>
-                {agents.map(a => <option key={a._id || a.name} value={a.name}>{a.name}</option>)}
+                {(agents || []).map(a => (
+  <option key={a._id || a.name} value={a.name}>{a.name}</option>
+))}
               </select>
 
               <select value={filtersLocal.priority}

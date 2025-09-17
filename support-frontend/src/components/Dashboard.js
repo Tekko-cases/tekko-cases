@@ -380,9 +380,10 @@ export default function Dashboard({ onLogout, user }) {
             </div>
 
             <div className="actions-row">
-  <button className="btn primary" onClick={createCase}>Create Case</button>
-</div>
-</section>
+              <button className="btn primary" onClick={createCase}>Create Case</button>
+            </div>
+          </div> {/* end .card */}
+        </section>
       )}
 
       {screen === 'filters' && (

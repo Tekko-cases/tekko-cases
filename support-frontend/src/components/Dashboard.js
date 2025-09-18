@@ -249,42 +249,34 @@ export default function Dashboard({ onLogout, user }) {
 // ---- Add log (note + optional files) ----
 const addLog = async () => {
   try {
-    if (!expandedCase || !expandedCase._id) {
-      alert('Open a case (View) before adding a log.');
-      return;
-    }
+    if (!expandedCase) return;
 
-    const hasNote = String(logNote || '').trim().length > 0;
-    const hasFiles = Array.isArray(logFiles) && logFiles.length > 0;
-    if (!hasNote && !hasFiles) {
-      alert('Type a note or attach a file.');
+    const hasNote  = String(logNote || '').trim().length > 0;
+    const filesArr = (logFiles || []).filter(Boolean);
+    if (!hasNote && filesArr.length === 0) {
+      alert('Please type a note or attach at least one file.');
       return;
     }
 
     const fd = new FormData();
-    if (hasNote) fd.append('note', String(logNote).trim());
-    (logFiles || []).forEach(f => fd.append('files', f));
+    if (hasNote) fd.append('note', logNote);
+    filesArr.forEach(f => fd.append('files', f));
 
-    await api.post(`/cases/${expandedCase._id}/logs`, fd);
-
-    // reset inputs
+    const r = await api.post(`/cases/${expandedCase._id}/logs`, fd);
+    setExpandedCase(r.data || r);   // reflect the updated case with the new log
     setLogNote('');
     setLogFiles([]);
-
-    // refresh the list; it’s OK if the row collapses—data is saved
     await loadCases();
-    alert('Log added.');
-  } catch (err) {
-    console.error(err);
+  } catch (e) {
     const msg =
-      err?.response?.data?.error ||
-      err?.response?.data?.message ||
-      err?.message ||
-      'Failed to add log';
+      e?.response?.data?.error ||
+      e?.response?.data?.message ||
+      e?.message ||
+      'Add log failed';
+    console.error(e);
     alert(msg);
   }
 };
-
 
   // ---- Close / Reopen / Delete ----
   const closeCase = async (id) => {
@@ -566,7 +558,13 @@ const addLog = async () => {
                                     <textarea placeholder="Note…" value={logNote} onChange={e => setLogNote(e.target.value)} />
                                   </div>
                                   <div className="actions-row">
-                                    <button className="btn primary">Add log</button>
+                                    <button
+  className="btn primary"
+  onClick={() => addLog(c._id)}
+  disabled={!logNote && logFiles.length === 0}
+>
+  Add log
+</button>
                                   </div>
 
                                   <ul className="loglist">

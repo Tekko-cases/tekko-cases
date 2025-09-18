@@ -204,6 +204,8 @@ router.post('/cases', auth, upload.array('files', 12), async (req, res) => {
       description: data.description || '',
       customerId: data.customerId || null,
       customerName: data.customerName || '',
+  customerEmail: data.customerEmail || '',
+  customerPhone: data.customerPhone || '',
       issueType: safeIssue,
       priority: safePriority,
       status: 'Open',

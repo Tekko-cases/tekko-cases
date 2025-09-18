@@ -23,6 +23,9 @@ const CaseSchema = new mongoose.Schema({
   customerId: { type: String, default: null },
   customerName: { type: String, required: true },
 
+  customerEmail: { type: String, default: '' },
+  customerPhone: { type: String, default: '' },
+
   issueType: { type: String, enum: ['Plans', 'Billing', 'Technical', 'Activation', 'Shipping', 'Rentals', 'Other'], default: 'Other' },
   priority: { type: String, enum: ['Low', 'Normal', 'High', 'Urgent'], default: 'Normal' },
 

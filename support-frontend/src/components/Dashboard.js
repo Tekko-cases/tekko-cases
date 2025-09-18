@@ -245,6 +245,47 @@ export default function Dashboard({ onLogout, user }) {
     }
   };
 
+
+// ---- Add log (note + optional files) ----
+const addLog = async () => {
+  try {
+    if (!expandedCase || !expandedCase._id) {
+      alert('Open a case (View) before adding a log.');
+      return;
+    }
+
+    const hasNote = String(logNote || '').trim().length > 0;
+    const hasFiles = Array.isArray(logFiles) && logFiles.length > 0;
+    if (!hasNote && !hasFiles) {
+      alert('Type a note or attach a file.');
+      return;
+    }
+
+    const fd = new FormData();
+    if (hasNote) fd.append('note', String(logNote).trim());
+    (logFiles || []).forEach(f => fd.append('files', f));
+
+    await api.post(`/cases/${expandedCase._id}/logs`, fd);
+
+    // reset inputs
+    setLogNote('');
+    setLogFiles([]);
+
+    // refresh the list; it’s OK if the row collapses—data is saved
+    await loadCases();
+    alert('Log added.');
+  } catch (err) {
+    console.error(err);
+    const msg =
+      err?.response?.data?.error ||
+      err?.response?.data?.message ||
+      err?.message ||
+      'Failed to add log';
+    alert(msg);
+  }
+};
+
+
   // ---- Close / Reopen / Delete ----
   const closeCase = async (id) => {
     try {

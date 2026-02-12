@@ -174,6 +174,18 @@ router.post('/agents', auth, async (req, res) => {
   }
 });
 
+// ---------- Agents: delete (deactivate) ----------
+router.delete('/agents/:id', auth, async (req, res) => {
+  try {
+    const agent = await User.findByIdAndUpdate(req.params.id, { active: false }, { new: true });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('Delete agent error:', e);
+    res.status(500).json({ error: 'Failed to delete agent' });
+  }
+});
+
 // ---------- Uploads ----------
 const uploadsRoot = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadsRoot)) fs.mkdirSync(uploadsRoot, { recursive: true });

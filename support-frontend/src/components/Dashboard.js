@@ -307,13 +307,23 @@ const addLog = async () => {
         alert('Please enter a name and password.');
         return;
       }
-      await api.post('/agents', { name: newAgentName.trim(), password: newAgentPassword });
+      await api.post('/api/agents', { name: newAgentName.trim(), password: newAgentPassword });
       setNewAgentName('');
       setNewAgentPassword('');
       await loadAgents();
       alert('Agent added.');
     } catch (e) {
       alert('Failed to add agent: ' + (e?.message || 'Error'));
+    }
+  };
+
+  const deleteAgent = async (id, name) => {
+    if (!window.confirm(`Remove agent "${name}"?`)) return;
+    try {
+      await api.delete(`/api/agents/${id}`);
+      await loadAgents();
+    } catch (e) {
+      alert('Failed to remove agent: ' + (e?.message || 'Error'));
     }
   };
 
@@ -526,7 +536,7 @@ const addLog = async () => {
               {agents.length === 0 && <div className="muted">No agents found.</div>}
               <table className="table">
                 <thead>
-                  <tr><th>Name</th><th>Email</th><th>Role</th></tr>
+                  <tr><th>Name</th><th>Email</th><th>Role</th><th style={{ width: 80 }}></th></tr>
                 </thead>
                 <tbody>
                   {agents.map(a => (
@@ -534,6 +544,7 @@ const addLog = async () => {
                       <td style={{ fontWeight: 600 }}>{a.name}</td>
                       <td className="muted">{a.email}</td>
                       <td>{a.role}</td>
+                      <td><button className="btn btn--danger" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => deleteAgent(a._id, a.name)}>Remove</button></td>
                     </tr>
                   ))}
                 </tbody>

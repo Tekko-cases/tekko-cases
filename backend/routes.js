@@ -136,6 +136,44 @@ async function seedAgents(req, res) {
 router.get('/admin/seed-agents', seedAgents);
 router.get('/api/admin/seed-agents', seedAgents);
 
+// ---------- Agents: list ----------
+router.get('/agents', auth, async (req, res) => {
+  try {
+    const agents = await User.find({ active: true }).select('_id name email role').lean();
+    res.json({ ok: true, data: agents });
+  } catch (e) {
+    console.error('List agents error:', e);
+    res.status(500).json({ error: 'Failed to list agents' });
+  }
+});
+
+// ---------- Agents: create ----------
+router.post('/agents', auth, async (req, res) => {
+  try {
+    const { name, password } = req.body || {};
+    if (!name || !password) return res.status(400).json({ error: 'Name and password are required' });
+
+    const nameTrimmed = name.trim();
+    const email = `${nameTrimmed.toLowerCase().replace(/\s+/g, '')}@agents.local`;
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(409).json({ error: 'Agent with that name already exists' });
+
+    const hash = await bcrypt.hash(password, 10);
+    const user = await User.create({
+      name: nameTrimmed,
+      email,
+      passwordHash: hash,
+      role: 'agent',
+      active: true,
+    });
+
+    res.status(201).json({ ok: true, agent: { _id: user._id, name: user.name, email: user.email, role: user.role } });
+  } catch (e) {
+    console.error('Create agent error:', e);
+    res.status(500).json({ error: 'Failed to create agent' });
+  }
+});
+
 // ---------- Uploads ----------
 const uploadsRoot = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadsRoot)) fs.mkdirSync(uploadsRoot, { recursive: true });

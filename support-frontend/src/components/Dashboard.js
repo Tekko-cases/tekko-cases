@@ -106,6 +106,9 @@ export default function Dashboard({ onLogout, user }) {
   const [logNote, setLogNote] = useState('');
   const [logFiles, setLogFiles] = useState([]);
 
+  const [newAgentName, setNewAgentName] = useState('');
+  const [newAgentPassword, setNewAgentPassword] = useState('');
+
   const loadAgents = useCallback(async () => {
     try {
       const r = await api.get('/api/agents');
@@ -173,10 +176,6 @@ export default function Dashboard({ onLogout, user }) {
     return items;
   }, [filteredCases, sort]);
 
-  const pagedCases = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return sortedCases.slice(start, start + pageSize);
-  }, [sortedCases, page, pageSize]);
 
   // ---- CREATE CASE (auto-create first log) ----
   const createCase = async () => {
@@ -302,6 +301,22 @@ const addLog = async () => {
     } catch (e) { console.error(e); alert('Failed to delete case'); }
   };
 
+  const addAgent = async () => {
+    try {
+      if (!newAgentName.trim() || !newAgentPassword) {
+        alert('Please enter a name and password.');
+        return;
+      }
+      await api.post('/agents', { name: newAgentName.trim(), password: newAgentPassword });
+      setNewAgentName('');
+      setNewAgentPassword('');
+      await loadAgents();
+      alert('Agent added.');
+    } catch (e) {
+      alert('Failed to add agent: ' + (e?.message || 'Error'));
+    }
+  };
+
   const applyFilters = (e) => { if (e) e.preventDefault(); setFilters(filtersLocal); setPage(1); setScreen('cases'); };
   const resetFilters  = () => { const empty = { q: '', issueType: '', agent: '', priority: '' }; setFiltersLocal(empty); setFilters(empty); setPage(1); };
 
@@ -310,6 +325,7 @@ const addLog = async () => {
       <button className={`btn ${screen==='create' ? 'primary' : ''}`} onClick={() => setScreen('create')}>Create case</button>
       <button className={`btn ${screen==='filters' ? 'primary' : ''}`} onClick={() => setScreen('filters')}>Filters & Search</button>
       <button className={`btn ${screen==='cases' ? 'primary' : ''}`} onClick={() => setScreen('cases')}>Cases</button>
+      <button className={`btn ${screen==='agents' ? 'primary' : ''}`} onClick={() => setScreen('agents')}>Agents</button>
       <div className="spacer" />
       {user && <span className="muted">Signed in as {user.name}</span>}
       {typeof onLogout === 'function' && <button className="btn" onClick={onLogout}>Log out</button>}
@@ -483,6 +499,50 @@ const addLog = async () => {
         </section>
       )}
 
+      {screen === 'agents' && (
+        <section className="col col-narrow">
+          <div className="card">
+            <div className="card-title">Manage Agents</div>
+
+            <div className="grid2">
+              <input
+                placeholder="Agent name"
+                value={newAgentName}
+                onChange={e => setNewAgentName(e.target.value)}
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={newAgentPassword}
+                onChange={e => setNewAgentPassword(e.target.value)}
+              />
+            </div>
+            <div className="actions-row">
+              <button className="btn primary" onClick={addAgent}>Add Agent</button>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div className="card-title" style={{ fontSize: 14 }}>Current Agents</div>
+              {agents.length === 0 && <div className="muted">No agents found.</div>}
+              <table className="table">
+                <thead>
+                  <tr><th>Name</th><th>Email</th><th>Role</th></tr>
+                </thead>
+                <tbody>
+                  {agents.map(a => (
+                    <tr key={a._id || a.name}>
+                      <td style={{ fontWeight: 600 }}>{a.name}</td>
+                      <td className="muted">{a.email}</td>
+                      <td>{a.role}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
+
       {screen === 'cases' && (
         <>
           <div className="tabs">
@@ -507,10 +567,10 @@ const addLog = async () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {pagedCases.length === 0 && (
+                    {sortedCases.length === 0 && (
                       <tr><td colSpan={7} style={{ padding: 16, color: '#6b7280' }}>No cases.</td></tr>
                     )}
-                    {pagedCases.map(c => {
+                    {sortedCases.map(c => {
                       const expanded = expandedCase && expandedCase._id === c._id;
                       return (
                         <React.Fragment key={c._id}>
@@ -613,8 +673,8 @@ const addLog = async () => {
 
               <div className="pagination">
                 <button className="btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
-                <span>Page {page} of {Math.max(1, Math.ceil(filteredCases.length / pageSize))}</span>
-                <button className="btn" disabled={page >= Math.max(1, Math.ceil(filteredCases.length / pageSize))}
+                <span>Page {page} of {Math.max(1, Math.ceil(total / pageSize))}</span>
+                <button className="btn" disabled={page >= Math.max(1, Math.ceil(total / pageSize))}
                         onClick={() => setPage(p => p + 1)}>Next</button>
               </div>
             </div>

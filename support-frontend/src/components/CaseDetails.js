@@ -56,7 +56,7 @@ export default function CaseDetails({ selectedCase }) {
       <h3 style={{marginTop:0}}>Case #{selectedCase.caseNumber || selectedCase._id}</h3>
 
       <form className="add-log-form" onSubmit={handleAddLog} style={{display:'grid',gap:8,marginBottom:16}}>
-        <div style={{fontWeight:700}}>Logged by: {author || '—'}</div>
+        <div style={{fontWeight:700}}>Logged by: {author || '-'}</div>
 
         <div>
           <label style={{display:'block',fontWeight:600}}>Note</label>
@@ -76,7 +76,7 @@ export default function CaseDetails({ selectedCase }) {
           {logs.map(log=>(
             <li key={log._id} style={{borderBottom:'1px solid #eee',padding:'10px 0'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                <div><b>{log.author}</b> — <span className="muted">{new Date(log.createdAt).toLocaleString()}</span></div>
+                <div><b>{log.author}</b> - <span className="muted">{new Date(log.createdAt).toLocaleString()}</span></div>
                 <button className="link danger" onClick={()=>removeLog(log._id)}>Delete</button>
               </div>
               <div style={{marginTop:6}}>{log.message}</div>

@@ -192,7 +192,7 @@ export default function Dashboard({ onLogout, user }) {
       }
       const computedTitle =
         (newCase.description || '').trim().split('\n')[0] ||
-        `${newCase.issueType || 'Issue'} — ${newCase.customerName || 'Customer'}`;
+        `${newCase.issueType || 'Issue'} - ${newCase.customerName || 'Customer'}`;
 
       const payload = {
         ...newCase,
@@ -394,7 +394,7 @@ const addLog = async () => {
                       >
                         <div className="title">{s.name}</div>
                         <div className="sub">
-                          {getFirstEmail(s) || '—'} · {getFirstPhone(s) || '—'}
+                          {getFirstEmail(s) || '-'} · {getFirstPhone(s) || '-'}
                         </div>
                       </div>
                     ))}
@@ -462,7 +462,7 @@ const addLog = async () => {
 
             {(newCase.customerEmail || newCase.customerPhone || extraPhones.length > 0) && (
               <div className="muted details-line">
-                <b>Customer details:</b> {newCase.customerEmail || '—'} · {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '—'}
+                <b>Customer details:</b> {newCase.customerEmail || '-'} · {[newCase.customerPhone, ...extraPhones].filter(Boolean).join(', ') || '-'}
               </div>
             )}
 
@@ -586,11 +586,11 @@ const addLog = async () => {
                       return (
                         <React.Fragment key={c._id}>
                           <tr>
-                            <td>#{c.caseNumber ?? '—'}</td>
+                            <td>#{c.caseNumber ?? '-'}</td>
                             <td>
                               <div style={{ fontWeight: 600 }}>{c.customerName}</div>
                               <div className="muted" style={{ fontSize: 12 }}>
-                                {(c.customerEmail || '—')} · {(c.customerPhone || '—')}
+                                {(c.customerEmail || '-')} · {(c.customerPhone || '-')}
                               </div>
                             </td>
                             <td>{c.issueType}</td>
@@ -618,10 +618,10 @@ const addLog = async () => {
                             <tr>
                               <td colSpan={7} className="logrow">
                                 <div className="card inner">
-                                  <div className="card-title">Logs — {c.customerName}</div>
+                                  <div className="card-title">Logs - {c.customerName}</div>
 
                                   <div className="muted" style={{ marginBottom: 8 }}>
-                                    <b>Customer:</b> {c.customerName} · {c.customerEmail || '—'} · {c.customerPhone || '—'}
+                                    <b>Customer:</b> {c.customerName} · {c.customerEmail || '-'} · {c.customerPhone || '-'}
                                   </div>
 
                                   <div className="grid2">
@@ -642,7 +642,7 @@ const addLog = async () => {
                                     {(c.logs || []).slice().reverse().map((log, i) => (
                                       <li key={i}>
                                         <b>{log.by || 'Agent'}</b>
-                                        <span className="muted"> — {log.at ? new Date(log.at).toLocaleString() : ''}</span>
+                                        <span className="muted"> - {log.at ? new Date(log.at).toLocaleString() : ''}</span>
                                         {log.note && <div className="lognote">{log.note}</div>}
                                         {Array.isArray(log.files) && log.files.length > 0 && (
                                           <div className="thumbs">

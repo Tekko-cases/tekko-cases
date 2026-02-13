@@ -52,7 +52,7 @@ export default function Cases() {
                 <td>{r.customerName}</td>
                 <td>{r.issueType}</td>
                 <td>{r.priority}</td>
-                <td>{r.agent || '—'}</td>
+                <td>{r.agent || '-'}</td>
                 <td>{r.status}</td>
                 <td className="actions">
                   {view === 'open' ? (

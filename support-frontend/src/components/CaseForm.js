@@ -1,4 +1,4 @@
-// CaseForm.js — FULL REPLACEMENT (with Square customer search dropdown)
+// CaseForm.js - FULL REPLACEMENT (with Square customer search dropdown)
 import React, { useState, useEffect } from 'react';
 
 const API_BASE =

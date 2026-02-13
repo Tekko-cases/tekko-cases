@@ -70,7 +70,7 @@ const start = async () => {
       });
       console.log('[startup] Mongo connected');
     } else {
-      console.warn('[startup] MONGO_URI missing — starting without DB');
+      console.warn('[startup] MONGO_URI missing - starting without DB');
     }
   } catch (err) {
     console.error('[startup] Mongo connect failed:', err.message);

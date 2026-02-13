@@ -27,7 +27,7 @@ const AGENTS = [
   { email: 'c.wasser@assistly.group',  name: 'Chayelle' },
   { email: 'info@assistly.group',      name: 'Admin' },
 
-  // ➕ GLEN — uses a placeholder email + his own password
+  // ➕ GLEN - uses a placeholder email + his own password
   { email: 'glen@assistly.local',      name: 'Glen', password: 'Tekko123' },
 ];
 
